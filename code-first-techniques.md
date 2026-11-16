@@ -307,6 +307,53 @@ After a drag, caches refill in about 1.5 s, with one 0.5 s window averaging 65 m
 - Shared impostor keys only work if the inputs are snapped: rotation, grass yaw, bend and sheen. Continuous values give a cache miss on every frame.
 - With many cache keys (6 sheen levels × fine bend bins), windy weather caused about 180 impostor builds per 0.5 s and 40 ms frames. Coarser bins and 3 sheen levels brought that down to about 18 builds.
 
+**Measured on a real phone** (iPhone 14 Pro, iOS 18.7, Safari, 393×695 CSS px, `?bench` mode, pixel ratio fixed at 1.5):
+
+| Scenario | fps | Frame p95 | Frames over 20 ms | JS CPU | Draws |
+|---|---|---|---|---|---|
+| Optimised, day idle | 60 | 17 ms | 0% | 1.6 ms | 192 |
+| Optimised, golden hour idle | 60 | 17 ms | 0% | 2.4 ms | 228 |
+| Optimised, night idle | **46** | **45 ms** | **29%** | 2.1 ms | 280 |
+| Optimised, night, no lamp shadows | 59 | 17 ms | 0% | 2.9 ms | 198 |
+| Optimised, night idle, pixel ratio 1.0 | **46** | **45 ms** | **29%** | 2.1 ms | 283 |
+| Optimised, walking through the meadow | 60 | 18 ms | 3% | 1.1 ms | 211 |
+| Optimised, windy | 60 | 17 ms | 1% | 1.6 ms | 196 |
+| Optimised, day dragging | 60 | 17 ms | 0% | 3.7 ms | 1,385 |
+| Optimised, night dragging | **26** | **47 ms** | **82%** | 4.7 ms | 1,624 |
+| Original, day idle (pixel ratio 2) | 5 | 203 ms | 100% | 9.3 ms | 4,029 |
+| Original, night idle (pixel ratio 2) | 13 | 81 ms | 100% | 8.1 ms | 3,145 |
+
+**Findings:**
+- **Lamp shadows cause the night slowdown.** The night layer rebuilds 15 times per second. Each rebuild with lamp shadows takes about 45 ms. That gives 29% slow frames, which is about 15 of every 60. If you switch off lamp shadows, the scene runs at 60 fps.
+- **While dragging at night, the rotation changes on every frame.** So the night layer rebuilds on every frame, and the scene drops to 26 fps.
+- **The cost is not fill rate.** At pixel ratio 1.0 the numbers do not change.
+- **The cost is not draw count.** Day dragging draws 1,385 images per frame at 60 fps.
+- **JavaScript does not see the cost.** The lamp-shadow phase uses 0.2 ms of JS time. The 45 ms is inside Safari's canvas pipeline. On Safari, only ablation runs (one feature off at a time) show where the time goes. JS phase timers do not.
+- The original renderer is much slower on Safari than headless Chromium suggested: 5 fps against 152 fps. Its per-frame sun shadows use the same offscreen-canvas chain as the lamp shadows.
+- **Suspect:** many scaled `drawImage` calls into an offscreen canvas, then `destination-in` and `source-in` passes on it, then that canvas drawn into another canvas in the same frame. We did not isolate the exact step. Caching made the question less urgent.
+
+**The fix: cache lamp shadows like sun shadows** (rules 1 and 4):
+- The static objects' lamp shadows (rest pose, grass included) are drawn once into one half-resolution layer. The layer is already tinted and clipped to the lamp pool. Its key is the snapped rotation, the size and the tint.
+- Each night rebuild draws that layer once. Then it redraws the kid's and Pip's lamp shadows. It does this only inside the lamp pool's box, and only if one of them stands in the pool.
+- The tint (`source-in`) and the clip (`destination-in`) touch only that box.
+- Lamp shadows are skipped while the player interacts (drag, fling, time scrubbing).
+- Trade-off: grass sway no longer moves the lamp shadows of grass. At phone size nobody sees this.
+
+**Before → after** (same iPhone 14 Pro, Safari, pixel ratio 1.5):
+
+| Scenario | Before: fps / p95 / slow frames | After: fps / p95 / slow frames |
+|---|---|---|
+| Night idle | 46 / 45 ms / 29% | **60 / 17 ms / 0%** |
+| Night, the kid in the lamp pool | not measured | 59 / 22 ms / 7% |
+| Night dragging | 26 / 47 ms / 82% | **60 / 17 ms / 0%** |
+| Day dragging | 60 / 17 ms / 0% | 60 / 17 ms / 0% |
+
+- With a mover in the pool, the box chain still costs a few slow frames (7%). If this shows in play, the next lever is to lower the mover rebuild rate. Another lever is to draw movers without the offscreen chain.
+- **Rule for Safari:** keep offscreen-canvas chains (draw, `source-in`, `destination-in`, then draw that canvas into another) out of the per-frame path. Cache their results, or limit them to a small box.
+- **Effect on the WebGL plan:** on this phone, optimised Canvas 2D now holds 60 fps in every scenario, dragging included. So WebGL is not needed for speed on a high-end phone. Test a cheap tablet before you decide.
+
+**Bench mode:** open `05-painted-diorama.html?bench` from `tools/bench-server.py`. The page runs every scenario by itself (1.5 s warm-up and 4 s of measurement each). Then it POSTs the results to the PC. The server saves them in `bench-results/` (git ignores this folder). Turn off Low Power Mode on iPhones first, because it caps Safari at 30 fps.
+
 **Still slow, and the next lever: WebGL for explore mode.** Dragging is the one case caching can't fix in Canvas 2D: every stack must be redrawn at a new angle. Sprite stacking is the ideal GPU workload: all slices of all models in one texture atlas, every slice an **instanced quad in a single draw call**, the bend and squash in the vertex shader, and shadows as a second instanced pass with a projection matrix. That should make dragging as cheap as idle. Keep Canvas 2D or SVG for the puppet stage and UI.
 
 ## 8. Decisions so far
