@@ -128,7 +128,7 @@ Story text is the voice of the fiction. ASD-STE100 does not apply to it. The kid
 ```
 
 - `voice` uses the babble parameters from prototype 08.
-- `map.figure` picks a voxel figure generator from the engine. Book one has `child` and `quadruped-small`. The colours come from the spec. Nobody draws the map figure.
+- `map.figure` picks a voxel figure generator from the engine. Book one has `child`, `quadruped-small` and `bird-small` (for flight). The colours come from the spec. Nobody draws the map figure.
 - `bones` is the rig. A bone has a pivot in drawing units, an optional parent, the parts it moves and its motion presets.
 - **Draw order is the SVG document order. The hierarchy is the bones.** These are two separate things. The hair can draw behind the torso and still move with the head (§5 of the findings).
 
@@ -165,6 +165,7 @@ Motion presets in book one: `breathe`, `sway`, `tapWobble`, `blink`, `lookAt`, `
   "water": [{ "kind": "pond", "circle": [-27, 20, 12] }],
   "path": { "points": [[-2, -14], [10, 10], [30, 50]], "width": 5 },
   "lights": [{ "kind": "lamp", "prop": "lamp", "reach": 30, "shadows": true }],
+  "flight": { "figure": "bird-small", "altitude": 26, "zoom": 1.8 },
   "markers": { "door": [-2, -12], "lamp": [32, 42] },
   "cast": [{ "id": "mira", "at": [16, 6] }, { "id": "pip", "at": [28, 13] }],
   "hotspots": [{ "id": "pip", "target": "cast:pip", "knot": "meet_pip" }]
@@ -175,6 +176,7 @@ Motion presets in book one: `breathe`, `sway`, `tapWobble`, `blink`, `lookAt`, `
 - `kind` names a prop generator in the engine library. Book one has the props from prototype 05: `cottage`, `pine`, `roundTree`, `mushroom`, `lantern`, `post`, `reed`, `grass`. A new prop is an engine change.
 - `scatter` places grass by rule. The rules keep grass away from the path, the water and other props, as prototype 05 does.
 - The `seed` makes every placement and every model deterministic.
+- `flight` is optional. If it is present, the scene shows the **Fly** button. The player becomes a small bird with a chase camera (§4.7 of the findings). Flight is free play: the bird starts no knots and has no goal. The `altitude` must be higher than the tallest prop.
 
 ### 5.6 `ui.json`
 
@@ -190,6 +192,7 @@ Every interface string: buttons, hints, menus, save messages and errors. It foll
 | `scene` | 05: object list, scatter, pond, path | **New:** load a scene document |
 | `light` | 05: time of day, sun shadows, night layer, lamp-shadow cache | Lights from the scene document |
 | `walk` | 05: tap to walk, obstacles, wading | Walk to markers for the `walk` tag |
+| `flight` | 05: Fly mode, chase camera, pan and zoom, `bird-small` figure | Read the `flight` block of the scene document |
 | `puppet` | 06: part baker, springs, expressions | **New:** a rig player driven by `bones` |
 | `voice` | 08: babble, prosody, text sync | None |
 | `music` | musikmodel `shared/` | Vendored copy |
@@ -233,6 +236,7 @@ The performance rules in §7 of the findings apply to every module.
 - Props, cast and markers stand on the slab. They do not stand in the water.
 - Every hotspot target exists. Every hotspot knot exists.
 - Each marker can be reached on foot from where the player starts.
+- If the scene has `flight`, its altitude is higher than every prop.
 - **Performance budget** (§8).
 
 **Interface copy**
