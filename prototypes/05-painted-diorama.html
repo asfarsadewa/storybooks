@@ -35,12 +35,15 @@
   <button id="painted" class="on">Painted</button>
   <button id="crisp">Crisp</button>
   <button id="windy">Windy</button>
+  <button id="optBtn" class="on">⚡ Optimised</button>
 </div>
 <div id="timebar" style="position:fixed;left:50%;bottom:40px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(255,250,240,.85);padding:6px 12px;border-radius:999px;box-shadow:0 2px 0 #d8c9ad;z-index:5;font-size:13px;font-weight:700">
   <span id="todlabel" style="width:74px">Afternoon</span>
   <input id="tod" type="range" min="0" max="1000" value="600" style="width:min(46vw,220px);accent-color:#e8b04a">
   <button id="cycle" style="border:0;border-radius:999px;padding:5px 10px;font:inherit;background:#2b9a8c;color:#fff">▶</button>
 </div>
+<div id="perf" style="position:fixed;left:8px;top:54px;z-index:6;background:rgba(255,250,240,.85);border-radius:8px;padding:4px 8px;font:600 11px/1.35 ui-monospace,Menlo,monospace;color:#3b2a2a;pointer-events:none;white-space:pre"></div>
+<div id="grainOv" style="position:fixed;inset:0;pointer-events:none;mix-blend-mode:multiply;opacity:.28;z-index:1;display:none"></div>
 <div id="hint">Walk through the tall grass · drag to turn · tap Pip</div>
 
 <div id="card">
@@ -93,13 +96,23 @@ addEventListener('error', e => { const el = document.getElementById('err'); el.s
 <script>
 setTimeout(() => {
 'use strict';
+// ============ performance settings ============
+// OPT switches between the original renderer (every stack redrawn slice by slice, every frame)
+// and the optimised one (cached layers, impostors, a pixel budget). See code-first-techniques.md.
+let OPT = true;
+let renderScale = 1;                                   // dynamic resolution, 0.75..1 (optimised mode)
+const ANG_STEPS = 256, ASTEP = Math.PI * 2 / ANG_STEPS; // rotation is snapped to 1.4 degree steps so caches can be reused
+const targetDPR = () => OPT ? Math.min(1.5, devicePixelRatio || 1) * renderScale : Math.min(2, devicePixelRatio || 1);
+const PERF = { draws: 0, builds: 0, rebuilds: 0, evict: 0, frame: [], gap: [], lastHud: 0, lastScale: 0, cacheReady: false };
+
 // ============ canvas ============
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let W, H, DPR, S;
 function resize(){
-  DPR = Math.min(2, devicePixelRatio || 1);
+  DPR = targetDPR();
   W = cv.width = Math.floor(innerWidth * DPR); H = cv.height = Math.floor(innerHeight * DPR);
   S = Math.min(innerWidth / 130, innerHeight / 140) * DPR;      // screen px per world unit
+  if (PERF.cacheReady) clearCaches();
 }
 addEventListener('resize', resize); resize();
 
@@ -335,12 +348,12 @@ for (const [mx, my, mr] of meadows) for (let gy = -mr; gy <= mr; gy += 2.4) for 
   const x = mx + gx + (rnd() - .5) * 2, y = my + gy + (rnd() - .5) * 2, d = Math.hypot(x - mx, y - my);
   if (d > mr || rnd() > 1.1 - d / mr * 0.7) continue;
   if (pathDist(x, y) < 5 || Math.hypot(x - pondC[0], y - pondC[1]) < pondR + 3 || Math.hypot(x, y) > GR - 4 || nearThing(x, y)) continue;
-  objs.push({ m: tuft((rnd() * 6) | 0), x, y, yaw: rnd() * 6.28, grass: true, sway: 1, ph: rnd() * 6.28 }); tuftCount++;
+  objs.push({ m: tuft((rnd() * 6) | 0), x, y, yaw: Math.round(rnd() * 16) * Math.PI / 8, grass: true, sway: 1, ph: rnd() * 6.28 }); tuftCount++;
 }
 for (let i = 0; i < 40; i++){ // lone tufts dotted across the lawn
   const a = rnd() * 6.28, r = rnd() * (GR - 6), x = Math.cos(a) * r, y = Math.sin(a) * r;
   if (pathDist(x, y) < 5 || Math.hypot(x - pondC[0], y - pondC[1]) < pondR + 3 || nearThing(x, y)) continue;
-  objs.push({ m: tuft((rnd() * 6) | 0), x, y, yaw: rnd() * 6.28, grass: true, sway: 1, ph: rnd() * 6.28 });
+  objs.push({ m: tuft((rnd() * 6) | 0), x, y, yaw: Math.round(rnd() * 16) * Math.PI / 8, grass: true, sway: 1, ph: rnd() * 6.28 });
 }
 // everything with height can sway: reeds a lot, trees only at the top
 for (const o of objs){
@@ -407,19 +420,22 @@ const grain = document.createElement('canvas'); grain.width = grain.height = 256
   for (let i = 0; i < 256 * 256; i++){ const v = 200 + (hash(i % 256, (i / 256) | 0, 3) * 55) | 0; im.data[i*4] = v; im.data[i*4+1] = v * .97; im.data[i*4+2] = v * .92; im.data[i*4+3] = 255; }
   g.putImageData(im, 0, 0); }
 const grainPat = ctx.createPattern(grain, 'repeat');
+{ const ov = document.getElementById('grainOv'); ov.style.backgroundImage = `url(${grain.toDataURL()})`; ov.style.backgroundSize = '256px 256px'; }
 
 // ============ state & input ============
-let painted = true, rot = -0.5, rotV = 0, idle = 0, t0 = performance.now(), last = t0;
+let painted = true, rot = -0.5, rotIn = -0.5, rotV = 0, idle = 0, t0 = performance.now(), last = t0;
 const q = 0.62;                 // ground tilt (vertical squash of the floor)
 const $ = id => document.getElementById(id);
 $('tod').oninput = e => { tod = e.target.value / 1000; cycling = false; $('cycle').textContent = '▶'; };
 $('cycle').onclick = () => { cycling = !cycling; $('cycle').textContent = cycling ? '❚❚' : '▶'; };
 $('windy').onclick = () => { windK = windK > 1 ? 1 : 2.4; $('windy').classList.toggle('on', windK > 1); };
+$('tod').addEventListener('input', () => { PERF.todInput = performance.now(); });
+$('optBtn').onclick = () => { OPT = !OPT; $('optBtn').classList.toggle('on', OPT); $('optBtn').textContent = OPT ? '⚡ Optimised' : 'Original'; renderScale = 1; resize(); clearCaches(); };
 $('painted').onclick = () => { painted = true; $('painted').classList.add('on'); $('crisp').classList.remove('on'); };
 $('crisp').onclick = () => { painted = false; $('crisp').classList.add('on'); $('painted').classList.remove('on'); };
 let down = null, moved = 0;
-cv.addEventListener('pointerdown', e => { down = { x: e.clientX, r: rot }; moved = 0; idle = 0; });
-addEventListener('pointermove', e => { if (!down) return; const dx = e.clientX - down.x; moved = Math.max(moved, Math.abs(dx)); const nr = down.r + dx * 0.008; rotV = (nr - rot); rot = nr; });
+cv.addEventListener('pointerdown', e => { down = { x: e.clientX, r: rotIn }; moved = 0; idle = 0; });
+addEventListener('pointermove', e => { if (!down) return; const dx = e.clientX - down.x; moved = Math.max(moved, Math.abs(dx)); const nr = down.r + dx * 0.008; rotV = (nr - rotIn); rotIn = nr; });
 addEventListener('pointerup', e => { if (down && moved < 8) tap(e.clientX * DPR, e.clientY * DPR); down = null; });
 
 // ============ render ============
@@ -427,26 +443,79 @@ let hedgeScreen = [0, 0];
 function proj(x, y){ const c = Math.cos(rot), s = Math.sin(rot); const xr = x * c - y * s, yr = x * s + y * c; return [W / 2 + xr * S, H * 0.54 + yr * S * q, yr]; }
 let DRAW = null;   // when set, drawStack draws into this context instead of the screen
 function drawStack(m, sx, sy, yaw, lift, alpha = 1, minZ = 0, bx = 0, by = 0, hs = 1, thin = false, sheen = 0, dark = 0){
-  const G = DRAW || ctx;
-  const k = S / m.R, ang = rot + yaw, c = Math.cos(ang), s = Math.sin(ang);
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  drawStackRaw(DRAW || ctx, m, sx, sy, rot + yaw, lift, (bx * cr - by * sr) * S, (bx * sr + by * cr) * S * q, hs, thin, sheen, alpha, minZ, dark);
+}
+function drawStackRaw(G, m, sx, sy, ang, lift, bsx, bsy, hs, thin, sheen, alpha, minZ, dark, stride = 1){
+  const k = S / m.R, c = Math.cos(ang), s = Math.sin(ang);
   const a = c * k, b = s * k * q, cc = -s * k, d = c * k * q;
   const step = (S / m.R) * 0.92;                      // vertical px per slice
   const rep = thin ? 1 : clamp(Math.ceil(step / (painted ? 1.4 : 1.1) ), 1, 5);
   const A = dark > 0 ? darkAtlas(m) : sheen > 0 && m.sheenP ? (painted ? m.sheenP : m.sheenC)[sheen] : (painted ? m.painted : m.crisp);
-  const cr = Math.cos(rot), sr = Math.sin(rot), bsx = (bx * cr - by * sr) * S, bsy = (bx * sr + by * cr) * S * q;
   G.imageSmoothingEnabled = painted;
   G.globalAlpha = alpha;
-  for (let z = minZ; z < m.Z; z++){
+  for (let z = minZ; z < m.Z; z += stride){
     if (!m.has[z]) continue;
     for (let r = 0; r < rep; r++){
       // bend: slide each slice along a world-space vector, more the higher it sits (a curved lean)
-      const f = (bx || by) ? Math.pow((z + r / rep) / m.Z, 1.7) : 0;
+      const f = (bsx || bsy) ? Math.pow((z + r / rep) / m.Z, 1.7) : 0;
       G.setTransform(a, b, cc, d, sx + bsx * f, sy - lift - (z + r / rep) * step * hs + bsy * f);
       G.drawImage(A, 1, z * (m.Y + 2) + 1, m.X, m.Y, -m.X / 2, -m.Y / 2, m.X, m.Y);
+      PERF.draws++;
     }
   }
   G.globalAlpha = 1;
 }
+// ---- impostors: a whole stack (at a snapped angle, bend, squash and sheen) rendered once into an atlas page ----
+// Pages are shared 1024x1024 canvases (few canvases = safe on iOS). When all pages are full, the oldest is recycled.
+const PAGE = 1024, MAXPAGES = 8, IMP_BUDGET = 24;      // at most 24 new impostors per frame; the rest draw live
+let pages = [], uidN = 0;
+const impMap = new Map();
+function newPage(){ const c = document.createElement('canvas'); c.width = c.height = PAGE; return { c, g: c.getContext('2d'), x: 0, y: 0, sh: 0, keys: [] }; }
+function alloc(w, h){
+  if (w > PAGE || h > PAGE) return null;
+  const fits = p => { if (p.x + w > PAGE){ p.y += p.sh; p.x = 0; p.sh = 0; } return p.y + h <= PAGE; };
+  let p = pages[pages.length - 1];
+  if (!p || !fits(p)){
+    if (pages.length < MAXPAGES){ p = newPage(); pages.push(p); }
+    else { p = pages.shift(); for (const k of p.keys) impMap.delete(k); p.keys = []; p.g.setTransform(1, 0, 0, 1, 0, 0); p.g.clearRect(0, 0, PAGE, PAGE); p.x = p.y = p.sh = 0; pages.push(p); PERF.evict++; }
+    if (!fits(p)) return null;
+  }
+  const r = { p, x: p.x, y: p.y }; p.x += w + 1; p.sh = Math.max(p.sh, h + 1); return r;
+}
+function buildImpostor(m, ang, bsx, bsy, hs, thin, sheen){
+  const k = S / m.R, step = k * 0.92, foot = Math.hypot(m.X, m.Y) * 0.5 * k + 2, hpx = m.Z * step * hs;
+  const w = Math.ceil(foot * 2 + Math.abs(bsx) + 4), h = Math.ceil(hpx + foot * q * 2 + Math.abs(bsy) + 4);
+  const r = alloc(w, h); if (!r) return null;
+  const ax = foot + 2 + Math.max(0, -bsx), ay = h - foot * q - 2 - Math.max(0, bsy);
+  const g = r.p.g; g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.beginPath(); g.rect(r.x, r.y, w, h); g.clip();
+  drawStackRaw(g, m, r.x + ax, r.y + ay, ang, 0, bsx, bsy, hs, thin, sheen, 1, 0, 0);
+  g.restore(); PERF.builds++;
+  return { p: r.p, x: r.x, y: r.y, w, h, ax, ay };
+}
+function drawStackOpt(m, sx, sy, yaw, lift, bx, by, hs, thin, sheen){
+  if (m.uid === undefined) m.uid = ++uidN;
+  const ang = rot + yaw, aq = ((Math.round(ang / ASTEP) % ANG_STEPS) + ANG_STEPS) % ANG_STEPS;
+  const cr = Math.cos(rot), sr = Math.sin(rot), bsx = (bx * cr - by * sr) * S, bsy = (bx * sr + by * cr) * S * q;
+  // while the camera is moving every key misses anyway: draw live, one draw per slice (no gap filling)
+  if (interacting){ drawStackRaw(ctx, m, sx, sy, ang, lift, bsx, bsy, hs, true, sheen, 1, 0, 0, thin ? 2 : 1); return; }
+  if (sheen > 0) sheen = Math.min(5, (sheen >> 1) * 2 + 1);   // 6 sheen levels -> 3 cached ones (1, 3, 5)
+  const bq = Math.max(2, S * (thin ? 0.65 : 0.5)), qx = Math.round(bsx / bq), qy = Math.round(bsy / bq), hq = Math.round(hs * 20);
+  const key = m.uid + '|' + aq + '|' + qx + '|' + qy + '|' + hq + '|' + sheen + '|' + (painted ? 1 : 0);
+  let e = impMap.get(key);
+  if (!e){
+    if (PERF.builds < IMP_BUDGET) e = buildImpostor(m, aq * ASTEP, qx * bq, qy * bq, hq / 20, thin, sheen);
+    if (!e){ drawStackRaw(ctx, m, sx, sy, ang, lift, bsx, bsy, hs, true, sheen, 1, 0, 0); return; }   // over budget this frame: a cheap live draw until it's cached
+    e.p.keys.push(key); impMap.set(key, e);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = painted;
+  ctx.drawImage(e.p.c, e.x, e.y, e.w, e.h, Math.round(sx - e.ax), Math.round(sy - lift - e.ay), e.w, e.h); PERF.draws++;
+}
+function clearCaches(){
+  for (const p of pages){ p.c.width = 0; p.c.height = 0; }   // release the memory now, not at GC time
+  pages = []; impMap.clear(); layerKey = ''; lightKey = ''; bgKey = '';
+}
+
 const motifs = []; seed = 21;
 for (let i = 0; i < 14; i++) motifs.push({ x: rnd(), y: rnd(), r: 5 + rnd() * 7, c: ['#f2a490','#9fd3c7','#f2c46d','#c7a6d9'][i % 4], k: i % 3, sp: .3 + rnd() * .5, ph: rnd() * 6 });
 function star(x, y, r, rot2){ ctx.beginPath(); for (let i = 0; i < 10; i++){ const a = rot2 + i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r * .45 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } ctx.closePath(); ctx.fill(); }
@@ -502,12 +571,24 @@ function sliceXform(v){
   const cr = Math.cos(rot), sr = Math.sin(rot);
   return { a: c * k, b: s2 * k * q, c: -s2 * k, d: c * k * q, bsx: (v.bx * cr - v.by * sr) * S, bsy: (v.bx * sr + v.by * cr) * S * q };
 }
-function drawSunShadows(vis, E){
-  half(shC); const w = shC.width, h = shC.height;
-  shX.setTransform(1, 0, 0, 1, 0, 0); shX.globalCompositeOperation = 'source-over'; shX.clearRect(0, 0, w, h);
-  shX.imageSmoothingEnabled = false;
+function drawSunShadows(vis, E, T = ctx, region = false){
+  half(shC); const w = shC.width, h = shC.height, kx = W / w, ky = H / h;
   const cr = Math.cos(rot), sr = Math.sin(rot);
   const ox = (E.shX * cr - E.shY * sr) * S, oy = (E.shX * sr + E.shY * cr) * S * q;   // screen px per unit of height
+  // region mode: only clear, tint and composite the box that these shadows can reach
+  let x0 = 0, y0 = 0, x1 = w, y1 = h;
+  if (region){
+    x0 = y0 = 1e9; x1 = y1 = -1e9;
+    for (const v of vis){ const m = v.o.m, r = Math.max(m.X, m.Y) / m.R * S * 0.8 + 6, Hz = m.Z / m.R;
+      x0 = Math.min(x0, v.sx - r, v.sx + ox * Hz - r); x1 = Math.max(x1, v.sx + r, v.sx + ox * Hz + r);
+      y0 = Math.min(y0, v.sy - r, v.sy + oy * Hz - r); y1 = Math.max(y1, v.sy + r, v.sy + oy * Hz + r); }
+    x0 = Math.max(0, Math.floor(x0 / kx) - 2); y0 = Math.max(0, Math.floor(y0 / ky) - 2); x1 = Math.min(w, Math.ceil(x1 / kx) + 2); y1 = Math.min(h, Math.ceil(y1 / ky) + 2);
+    if (x1 <= x0 || y1 <= y0) return;
+  }
+  const rw = x1 - x0, rh = y1 - y0;
+  shX.save(); shX.setTransform(1, 0, 0, 1, 0, 0); shX.beginPath(); shX.rect(x0, y0, rw, rh); shX.clip();
+  shX.globalCompositeOperation = 'source-over'; shX.clearRect(x0, y0, rw, rh);
+  shX.imageSmoothingEnabled = false;
   for (const v of vis){
     const m = v.o.m, X = sliceXform(v), grass = !!v.o.grass;
     const per = Math.hypot(ox, oy) / m.R, rep = clamp(Math.ceil(per / 2.5), 1, grass ? 2 : 6), stride = grass ? 2 : 1;
@@ -515,19 +596,19 @@ function drawSunShadows(vis, E){
       if (!m.has[z]) continue;
       for (let r = 0; r < rep; r++){
         const zz = z + r / rep, hz = (zz - v.minZ) / m.R, f = (v.bx || v.by) ? Math.pow(zz / m.Z, 1.7) : 0;
-        shX.setTransform(X.a / 2, X.b / 2, X.c / 2, X.d / 2, (v.sx + ox * hz + X.bsx * f) / 2, (v.sy + oy * hz + X.bsy * f) / 2);
-        shX.drawImage(m.crisp, 1, z * (m.Y + 2) + 1, m.X, m.Y, -m.X / 2, -m.Y / 2, m.X, m.Y);
+        shX.setTransform(X.a / kx, X.b / ky, X.c / kx, X.d / ky, (v.sx + ox * hz + X.bsx * f) / kx, (v.sy + oy * hz + X.bsy * f) / ky);
+        shX.drawImage(m.crisp, 1, z * (m.Y + 2) + 1, m.X, m.Y, -m.X / 2, -m.Y / 2, m.X, m.Y); PERF.draws++;
       }
     }
   }
   shX.setTransform(1, 0, 0, 1, 0, 0);
-  shX.globalCompositeOperation = 'source-in'; shX.fillStyle = SHADOW_COL; shX.fillRect(0, 0, w, h);
+  shX.globalCompositeOperation = 'source-in'; shX.fillStyle = SHADOW_COL; shX.fillRect(x0, y0, rw, rh);
   // shadows only land on the slab top (the slab casts its own onto the table)
   shX.globalCompositeOperation = 'destination-in'; shX.beginPath();
-  shX.ellipse(W / 4, (H * 0.54 - GH * S * 0.92) / 2, GR * S / 2 - 1, GR * S * q / 2 - 1, 0, 0, 7); shX.fill();
-  shX.globalCompositeOperation = 'source-over';
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true;
-  ctx.globalAlpha = 0.4 * E.sunK; ctx.drawImage(shC, 0, 0, W, H); ctx.globalAlpha = 1;
+  shX.ellipse(W / 2 / kx, (H * 0.54 - GH * S * 0.92) / ky, GR * S / kx - 1, GR * S * q / ky - 1, 0, 0, 7); shX.fill();
+  shX.restore(); shX.globalCompositeOperation = 'source-over';
+  T.setTransform(1, 0, 0, 1, 0, 0); T.imageSmoothingEnabled = true;
+  T.globalAlpha = 0.4 * E.sunK; T.drawImage(shC, x0, y0, rw, rh, x0 * kx, y0 * ky, rw * kx, rh * ky); T.globalAlpha = 1; PERF.draws++;
 }
 // point light: a slice at height h is scaled away from the lamp by Hl / (Hl - h) and lands on the ground there
 function drawLampShadows(vis, lamp, Hl, reach){
@@ -537,7 +618,7 @@ function drawLampShadows(vis, lamp, Hl, reach){
   for (const v of vis){
     const o = v.o; if (o === lamp) continue;
     const dx = o.x - lamp.x, dy = o.y - lamp.y; if (Math.hypot(dx, dy) > reach) continue;
-    const m = o.m, X = sliceXform(v), stride = 1;
+    const m = o.m, X = sliceXform(v), stride = OPT && o.grass ? 3 : 1;
     for (let z = v.minZ; z < m.Z; z += stride){
       if (!m.has[z]) continue;
       const hz = (z - v.minZ) / m.R; if (hz > Hl - 0.6) break;
@@ -547,7 +628,7 @@ function drawLampShadows(vis, lamp, Hl, reach){
       for (let r = 0; r < (o.grass ? 1 : 2); r++){
         const s2 = sc * (1 + r * 0.04);
         lsX.setTransform(X.a * s2 / 2, X.b * s2 / 2, X.c * s2 / 2, X.d * s2 / 2, px / 2, (py - lift0) / 2);
-        lsX.drawImage(m.crisp, 1, z * (m.Y + 2) + 1, m.X, m.Y, -m.X / 2, -m.Y / 2, m.X, m.Y);
+        lsX.drawImage(m.crisp, 1, z * (m.Y + 2) + 1, m.X, m.Y, -m.X / 2, -m.Y / 2, m.X, m.Y); PERF.draws++;
       }
     }
   }
@@ -564,10 +645,26 @@ const LAMP = objs.find(o => o.glow), LAMP_H = 12.4;
 function localToWorld(o, lx, ly){ const c = Math.cos(o.yaw), s2 = Math.sin(o.yaw); return [o.x + lx * c - ly * s2, o.y + lx * s2 + ly * c]; }
 const WINDOWS = [[7.8, 3.7], [7.8, -3.7], [0, 5.8], [0, -5.8]];
 // the scene tint + light pools + lamp shadows, multiplied over everything; then additive glows
+let lightKey = '', lightT = -1;
+const glowCache = {};
+function glowSprite(col){
+  if (glowCache[col]) return glowCache[col];
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, `rgba(${col},1)`); gr.addColorStop(1, `rgba(${col},0)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return glowCache[col] = c;
+}
 function drawLighting(vis, E, t){
   const lift0 = GH * S * 0.92;
   const tintAmt = Math.max(E.golden, E.night);
   if (tintAmt < 0.01) return;
+  const key = rot + '|' + Math.round(tod * 400) + '|' + W + '|' + H;
+  const rebuild = !OPT || key !== lightKey || t - lightT > 1 / 15;
+  if (rebuild){ lightKey = key; lightT = t; buildNight(vis, E, t, lift0); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true;
+  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(dkC, 0, 0, W, H); ctx.globalCompositeOperation = 'source-over'; PERF.draws++;
+  drawGlows(E, t, lift0);
+}
+function buildNight(vis, E, t, lift0){
   half(dkC); const w = dkC.width, h = dkC.height;
   dkX.setTransform(1, 0, 0, 1, 0, 0); dkX.globalCompositeOperation = 'source-over';
   dkX.fillStyle = `rgb(${E.tint[0] | 0},${E.tint[1] | 0},${E.tint[2] | 0})`; dkX.fillRect(0, 0, w, h);
@@ -593,12 +690,14 @@ function drawLighting(vis, E, t){
     lsX.globalCompositeOperation = 'source-in'; lsX.fillStyle = `rgb(${E.tint[0] | 0},${E.tint[1] | 0},${E.tint[2] | 0})`; lsX.fillRect(0, 0, lsC.width, lsC.height); lsX.globalCompositeOperation = 'source-over';
     dkX.globalAlpha = Math.min(1, E.night * 1.1); dkX.drawImage(lsC, 0, 0); dkX.globalAlpha = 1;
   }
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = true;
-  ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(dkC, 0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+}
+function drawGlows(E, t, lift0){
+  const flick = 0.92 + 0.08 * Math.sin(t * 13) * Math.sin(t * 7.3);
   if (E.night > 0.01){
     ctx.globalCompositeOperation = 'lighter';
     const glow = (wx, wy, hgt, rad, col, a) => {
       const [px, py] = proj(wx, wy), cy = py - lift0 - hgt * S * 0.92;
+      if (OPT){ ctx.globalAlpha = Math.min(1, a); ctx.drawImage(glowSprite(col), px - rad * S, cy - rad * S, rad * S * 2, rad * S * 2); ctx.globalAlpha = 1; PERF.draws++; return; }
       const g = ctx.createRadialGradient(px, cy, 0, px, cy, rad * S);
       g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(1, `rgba(${col},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, cy, rad * S, 0, 7); ctx.fill();
@@ -612,15 +711,60 @@ function drawLighting(vis, E, t){
   }
 }
 let fireflyPos = [];
+let bgKey = '', bgGrad = null, visArr = null, layerKey = '', interacting = false;
+const layerC = document.createElement('canvas'), layerX = layerC.getContext('2d');
+const isMover = o => o === GIRL || o.hedgehog;
+function compact(arr, keep){ let j = 0; for (let i = 0; i < arr.length; i++) if (keep(arr[i])) arr[j++] = arr[i]; arr.length = j; }
+// Everything on the ground that doesn't move: table shadow, slab, contact blobs, sun shadows of static things.
+// Rebuilt only when rotation, time of day, size or style change. While dragging, it skips the shadows.
+function drawStaticLayer(E, interacting, lift0){
+  const key = rot.toFixed(5) + '|' + Math.round(tod * 200) + '|' + painted + '|' + W + '|' + H + '|' + (interacting ? 0 : 1);
+  if (key !== layerKey){
+    layerKey = key; PERF.rebuilds++;
+    if (layerC.width !== W || layerC.height !== H){ layerC.width = W; layerC.height = H; }
+    const L = layerX; L.setTransform(1, 0, 0, 1, 0, 0); L.clearRect(0, 0, W, H);
+    { const cr = Math.cos(rot), sr = Math.sin(rot), o2 = E.sunK * GH * 0.5, ox = (E.shX * cr - E.shY * sr) * S * o2, oy = (E.shX * sr + E.shY * cr) * S * q * o2;
+      L.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; L.beginPath(); L.ellipse(W / 2 + ox, H * .54 + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); L.fill(); }
+    DRAW = L; drawStack(ground, W / 2, H * .54, 0, 0); DRAW = null;
+    const statics = [];
+    for (const o of objs){ if (isMover(o)) continue; const [sx, sy] = proj(o.x, o.y); statics.push({ o, sx, sy: sy - lift0, bx: 0, by: 0, hs: 1, minZ: 0 }); }
+    L.setTransform(1, 0, 0, 1, 0, 0); L.fillStyle = `rgba(40,50,40,${.1 + .1 * (1 - E.sunK)})`;
+    for (const v of statics){ if (v.o.grass) continue; const r = Math.max(v.o.m.X, v.o.m.Y) / v.o.m.R * 0.36 * S; L.beginPath(); L.ellipse(v.sx + DPR, v.sy + DPR, r, r * q, 0, 0, 7); L.fill(); }
+    if (!interacting && E.sunK > 0.01) drawSunShadows(statics, E, L, false);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layerC, 0, 0); PERF.draws++;
+}
+// frame-time HUD + dynamic resolution
+function pct(a, p){ const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(b.length * p))] || 0; }
+function perfTick(now){
+  if (now - PERF.lastHud < 500) return;
+  const fr = PERF.frame, gp = PERF.gap, n = Math.max(1, gp.length);
+  const fps = 1000 / (gp.reduce((a, b) => a + b, 0) / n), cpu = fr.reduce((a, b) => a + b, 0) / Math.max(1, fr.length);
+  PERF.stats = { fps, cpu, p95: pct(fr, .95), draws: PERF.draws, scale: DPR, imps: impMap.size, rebuilds: PERF.rebuilds, built: PERF.builtSum || 0, evict: PERF.evict };
+  PERF.builtSum = 0;
+  $('perf').textContent = `${OPT ? 'optimised' : 'original '} ${fps.toFixed(0)} fps  cpu ${cpu.toFixed(1)}ms (p95 ${pct(fr, .95).toFixed(1)})\n${PERF.draws} draws  px ratio ${DPR.toFixed(2)}${OPT ? `  imp ${impMap.size}  layer ${PERF.rebuilds}/s` : ''}`;
+  // dynamic resolution: drop the pixel ratio when frames are slow, raise it again when there's headroom
+  if (OPT && now - PERF.lastScale > 2500 && gp.length > 20){
+    if (fps < 45 && renderScale > 0.75){ renderScale -= 0.125; PERF.lastScale = now; resize(); }
+    else if (fps > 57 && cpu < 8 && renderScale < 1){ renderScale += 0.125; PERF.lastScale = now; resize(); }
+  }
+  PERF.frame = []; PERF.gap = []; PERF.rebuilds = 0; PERF.lastHud = now;
+}
+PERF.cacheReady = true;
 
 function frame(now){
-  if (cv.width !== Math.floor(innerWidth * Math.min(2, devicePixelRatio || 1)) || cv.height !== Math.floor(innerHeight * Math.min(2, devicePixelRatio || 1))) resize();
+  if (cv.width !== Math.floor(innerWidth * targetDPR()) || cv.height !== Math.floor(innerHeight * targetDPR())) resize();
   if (!W || !H){ requestAnimationFrame(frame); return; }
+  const cpu0 = performance.now(); PERF.draws = 0; PERF.builds = 0;
+  if (PERF.prev) PERF.gap.push(now - PERF.prev); PERF.prev = now;
   const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; const t = (now - t0) / 1000;
   if (cycling){ tod = (tod + dt / 45) % 1; $('tod').value = Math.round(tod * 1000); }
   const E = environment(tod);
   $('todlabel').textContent = tod < .12 ? 'Morning' : tod < .45 ? 'Midday' : tod < .6 ? 'Afternoon' : tod < .69 ? 'Golden hour' : tod < .76 ? 'Sunset' : 'Night';
-  if (!down){ rot += rotV; rotV *= 0.92; idle += dt; if (idle > 3 && !GIRL.walking) rot += dt * 0.12; }
+  // optimised mode doesn't spin on its own: a constantly moving camera means nothing can ever be cached
+  if (!down){ rotIn += rotV; rotV *= Math.pow(0.92, dt * 60); if (Math.abs(rotV) < 2e-3) rotV = 0; idle += dt; if (!OPT && idle > 3 && !GIRL.walking) rotIn += dt * 0.12; }
+  rot = OPT ? Math.round(rotIn / ASTEP) * ASTEP : rotIn;
+  interacting = OPT && ((down && moved > 4) || rotV !== 0 || performance.now() - (PERF.todInput || 0) < 250 || cycling);
   // ---- walk the kid towards her target ----
   if (GIRL.walking){
     const dx = GIRL.tx - GIRL.x, dy = GIRL.ty - GIRL.y, d = Math.hypot(dx, dy);
@@ -655,18 +799,21 @@ function frame(now){
     }
   }
   for (const r of ripples) r.t += dt;
-  ripples = ripples.filter(r => r.t < r.life + r.delay);
+  compact(ripples, r => r.t < r.life + r.delay);
   for (const d of drops){ d.t += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.z += d.vz * dt; d.vz -= 60 * dt; }
-  drops = drops.filter(d => d.z > 0);
+  compact(drops, d => d.z > 0);
   // Pip turns to look at her when she's close
   if (Math.hypot(GIRL.x - HEDGE.x, GIRL.y - HEDGE.y) < 22){ let da = Math.atan2(GIRL.y - HEDGE.y, GIRL.x - HEDGE.x) - HEDGE.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); HEDGE.yaw += da * Math.min(1, dt * 4); }
 
-  // background: paper + soft vignette
+  // background: paper + soft vignette (the gradient is only rebuilt when size or time of day changes)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const bg = ctx.createRadialGradient(W / 2, H * .5, 10, W / 2, H * .5, Math.max(W, H) * .75);
-  const bgIn = mix(mix([248, 240, 224], [250, 226, 200], E.golden * .6), [44, 54, 98], E.night), bgOut = mix(mix([233, 220, 196], [236, 204, 178], E.golden * .6), [26, 32, 64], E.night);
-  bg.addColorStop(0, `rgb(${bgIn.map(Math.round)})`); bg.addColorStop(1, `rgb(${bgOut.map(Math.round)})`);
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  const bk = W + '|' + H + '|' + Math.round(tod * 400);
+  if (!OPT || bk !== bgKey){
+    bgKey = bk; bgGrad = ctx.createRadialGradient(W / 2, H * .5, 10, W / 2, H * .5, Math.max(W, H) * .75);
+    const bgIn = mix(mix([248, 240, 224], [250, 226, 200], E.golden * .6), [44, 54, 98], E.night), bgOut = mix(mix([233, 220, 196], [236, 204, 178], E.golden * .6), [26, 32, 64], E.night);
+    bgGrad.addColorStop(0, `rgb(${bgIn.map(Math.round)})`); bgGrad.addColorStop(1, `rgb(${bgOut.map(Math.round)})`);
+  }
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
 
   // stars come out at night
   if (E.night > 0.05){ for (let i = 0; i < 70; i++){ const x = hash(i, 1, 9) * W, y = hash(i, 2, 9) * H * .9, tw = .5 + .5 * Math.sin(t * (1 + hash(i, 3, 9) * 2) + i);
@@ -680,12 +827,15 @@ function frame(now){
     ctx.globalAlpha = 1;
   }
 
-  // ground shadow + slab
+  // ground shadow + slab (+ in optimised mode: static contact blobs and static sun shadows, all cached in one layer)
+  const lift0 = GH * S * 0.92;
+  if (OPT) drawStaticLayer(E, interacting, lift0);
+  else {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   { const cr = Math.cos(rot), sr = Math.sin(rot), o2 = E.sunK * GH * 0.5, ox = (E.shX * cr - E.shY * sr) * S * o2, oy = (E.shX * sr + E.shY * cr) * S * q * o2;
     ctx.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; ctx.beginPath(); ctx.ellipse(W / 2 + ox, H * .54 + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); ctx.fill(); }
   drawStack(ground, W / 2, H * .54, 0, 0);
-  const lift0 = GH * S * 0.92;
+  }
 
   // ripples: rings on the water surface, clipped to the pond so they never spill onto grass
   if (ripples.length){
@@ -710,7 +860,12 @@ function frame(now){
 
   // ---- pose pass: bend, squash, sheen, bob for every stack (shadows and drawing both use it) ----
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const vis = objs.map(o => { const [sx, sy, yr] = proj(o.x, o.y); return { o, sx, sy: sy - lift0, yr, bx: 0, by: 0, hs: 1, lvl: 0, bob: 0, minZ: 0 }; }).sort((a, b) => a.yr - b.yr);
+  let vis;
+  if (OPT){   // reuse the same objects every frame: no garbage, no GC stutter
+    if (!visArr) visArr = objs.map(o => ({ o }));
+    for (const v of visArr){ const [sx, sy, yr] = proj(v.o.x, v.o.y); v.sx = sx; v.sy = sy - lift0; v.yr = yr; v.bx = 0; v.by = 0; v.hs = 1; v.lvl = 0; v.bob = 0; v.minZ = 0; }
+    vis = visArr.sort((a, b) => a.yr - b.yr);
+  } else vis = objs.map(o => { const [sx, sy, yr] = proj(o.x, o.y); return { o, sx, sy: sy - lift0, yr, bx: 0, by: 0, hs: 1, lvl: 0, bob: 0, minZ: 0 }; }).sort((a, b) => a.yr - b.yr);
   for (const v of vis){
     const o = v.o;
     if (o.hedgehog) v.bob = Math.abs(Math.sin(t * 2.2)) * 1.2 * DPR;
@@ -739,9 +894,10 @@ function frame(now){
   }
   // contact shadows: soft blobs under things (ambient occlusion, stays at night)
   ctx.fillStyle = `rgba(40,50,40,${.1 + .1 * (1 - E.sunK)})`;
-  for (const v of vis){ if ((v.o === GIRL && GIRL.sink > .3) || v.o.grass) continue; const r = Math.max(v.o.m.X, v.o.m.Y) / v.o.m.R * 0.36 * S; ctx.beginPath(); ctx.ellipse(v.sx + 1 * DPR, v.sy + 1 * DPR, r, r * q, 0, 0, 7); ctx.fill(); }
+  for (const v of vis){ if ((v.o === GIRL && GIRL.sink > .3) || v.o.grass || (OPT && !isMover(v.o))) continue; const r = Math.max(v.o.m.X, v.o.m.Y) / v.o.m.R * 0.36 * S; ctx.beginPath(); ctx.ellipse(v.sx + 1 * DPR, v.sy + 1 * DPR, r, r * q, 0, 0, 7); ctx.fill(); }
   // sun shadows: every stack, slice by slice, projected along the sun
-  if (E.sunK > 0.01) drawSunShadows(vis, E);
+  // (optimised: static ones are already in the cached layer; only movers are drawn, and only in their own box)
+  if (E.sunK > 0.01 && !interacting){ if (OPT) drawSunShadows(vis.filter(isMover), E, ctx, true); else drawSunShadows(vis, E); }
 
   // ---- stacks, back to front ----
   for (const v of vis){
@@ -752,7 +908,8 @@ function frame(now){
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.strokeStyle = `rgba(248,252,245,${.7 * GIRL.sink})`; ctx.lineWidth = 1.6 * DPR;
       ctx.beginPath(); ctx.ellipse(v.sx, v.sy, 2.3 * S, 2.3 * S * q, 0, 0.05 * Math.PI, 0.95 * Math.PI); ctx.stroke();
-    } else if (o.sway) drawStack(o.m, v.sx, v.sy + lift0, o.yaw, lift0, 1, 0, v.bx, v.by, v.hs, !!o.grass, v.lvl);
+    } else if (OPT && o !== GIRL) drawStackOpt(o.m, v.sx, v.sy + lift0, o.yaw, lift0 + v.bob, v.bx, v.by, v.hs, !!o.grass, v.lvl);
+    else if (o.sway) drawStack(o.m, v.sx, v.sy + lift0, o.yaw, lift0, 1, 0, v.bx, v.by, v.hs, !!o.grass, v.lvl);
     else drawStack(o.m, v.sx, v.sy + lift0, o.yaw, lift0 + v.bob);
     // small things standing in a tree's (or the cottage's) shadow get darker
     if (o === GIRL || o.hedgehog || o.m === mushroom || o.m === post){
@@ -804,12 +961,15 @@ function frame(now){
     ctx.fillStyle = `rgba(232,176,74,${p})`; sparkle(hedgeScreen[0], hedgeScreen[1] - 3 * S - Math.sin(t * 3) * 2 * DPR, 2.4 * S * p);
   }
 
-  // paper grain over the whole frame (painted mode)
-  if (painted){
+  // paper grain over the whole frame (painted mode). Optimised: a static CSS layer the browser composites for free
+  $('grainOv').style.display = OPT && painted ? 'block' : 'none';
+  if (painted && !OPT){
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .28; ctx.fillStyle = grainPat; ctx.fillRect(0, 0, W / DPR, H / DPR);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   }
+  PERF.frame.push(performance.now() - cpu0); PERF.builtSum = (PERF.builtSum || 0) + PERF.builds;
+  perfTick(now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -860,7 +1020,7 @@ function screenToWorld(x, y){
   return [dx * c + dy * s2, -dx * s2 + dy * c];
 }
 function walkTo(x, y, onArrive){ GIRL.tx = x; GIRL.ty = y; GIRL.walking = true; GIRL.onArrive = onArrive || null; marker = { x, y, t: 0.8 }; }
-window.__test = { setTod: (v) => { tod = v; }, walkTo: (x, y) => walkTo(x, y), pond: () => pondC, tufts: () => objs.filter(o => o.grass).length };
+window.__test = { perf: () => PERF.stats, opt: (on) => { if (OPT !== on) $('optBtn').click(); }, drag: (v) => { rotIn += v; rotV = 0; }, setTod: (v) => { tod = v; }, walkTo: (x, y) => walkTo(x, y), pond: () => pondC, tufts: () => objs.filter(o => o.grass).length };
 function openChat(){ $('card').classList.add('open'); $('hint').style.opacity = 0; node('start'); }
 function tap(x, y){
   if ($('card').classList.contains('open')) return;
