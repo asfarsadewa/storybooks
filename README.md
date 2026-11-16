@@ -1,1 +1,13 @@
 # storybooks
+
+Experiments for a storybook game where every asset (world, characters, light, music) is generated from code.
+
+| Prototype | What it shows |
+|---|---|
+| `prototypes/01-sprite-stack-flight.html` | Sprite stacking basics: a plane over a procedural island |
+| `prototypes/02-mode7-stack-racer.html` | Mode 7 ground plus perspective sprite stacks, LOD, camera presets |
+| `prototypes/03-mode7-stack-racer-refined.html` | The same with refined voxels and baked per-voxel lighting |
+| `prototypes/04-gouache-svg-illustration.html` | A gouache-style illustration from SVG shapes and filters |
+| `prototypes/05-painted-diorama.html` | Painted voxel diorama: walking, wading, ripples, grass and wind, sun and lamp shadows, puppet dialogue |
+
+Open any file in a browser. The findings are in `code-first-techniques.md`.
