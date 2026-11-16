@@ -11,6 +11,6 @@ This repo is research for a code-first narrative storybook game for children. It
 - `prototypes/07-gait-walker.html` is the procedural gait reference. It exposes `window.__test` (`state()`, `gait(name)`, `stop()`, `go(±1)`, `speed(v)`, `pipBtn()`, `pip()`). Planted feet (hers and Pip's) must drift 0 units; check that after any change.
 - `prototypes/08-babble-voices.html` is the dialogue-voice reference. It exposes `window.__test` (`plan(text, who, style)`, `state()`). Check audio generators by rendering through `OfflineAudioContext` (peak, RMS, NaNs).
 - **Performance is part of done.** Follow the rules in `code-first-techniques.md` §7. Every interactive prototype shows a frame-time HUD (fps, CPU ms, draws per frame, pixel ratio). Report before/after numbers for any rendering change, and say what hardware they came from (headless numbers are for comparison only; real phones are the target).
-- No asset files. Everything visual or audible is generated from `(generator, params, seed)` and baked once.
+- No asset files. Everything visual or audible is generated from `(generator, params, seed)` and baked once. One exception: the game's UI font, Fredoka (SIL OFL 1.1), chosen by the author because system fonts did not look like a game.
 - Before a change in technique, discuss it first and list its edge cases.
 - Add new findings to `code-first-techniques.md`, in the matching section, with measured numbers where you have them.
