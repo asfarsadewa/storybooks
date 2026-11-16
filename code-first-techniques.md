@@ -266,10 +266,54 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 
 **Fits with:** tiny-voca (an Apache-2.0, about 18 MB English TTS model that runs in the browser) for real read-aloud narration, with babble for character chatter. Pitch and formant shifting on its two voices could give a whole cast.
 
-## 7. Decisions so far
+## 7. Performance: the code-first "asset pipeline"
+
+**Context (from the design conversation):** the painted diorama (§4) felt laggy on a real phone. That is the core trade of code-first art: assets are expensive to ship and cheap to draw, while generated art is free to ship and costs CPU and GPU every frame you redraw it. So the habits change from "make files smaller" to **"redraw less, at fewer pixels"**. Treat the rules below as the default for every renderer in this project, the way asset compression is the default elsewhere.
+
+**Why the diorama lagged:**
+- 3,000–5,900 `drawImage` calls per frame: every slice of every stack, often 2–4 times to fill gaps.
+- Every slice drawn again for sun shadows, every frame.
+- A full-resolution canvas at 2× pixel ratio, plus a full-screen paper-grain blend and night-tint blend every frame.
+- Idle auto-rotation, so nothing was ever still long enough to cache.
+- New gradients, `vis` arrays and `filter()` results every frame, which means garbage-collection stutter on phones.
+
+**The rules (all implemented in `05-painted-diorama.html`; the ⚡ button switches to the original renderer for A/B):**
+1. **Cache layers, not just parts.** Everything on the ground that doesn't move (table shadow, slab, contact blobs, sun shadows of static things including grass) lives in one screen-sized layer. It is rebuilt only when its key changes: snapped rotation, time of day (1/200 steps), size, painted mode, interacting yes/no.
+2. **Impostors for stacks.** A whole stack at a snapped angle (256 steps = 1.4°), quantised screen-space bend (0.5 S; 0.65 S for grass), squash (1/20) and sheen (3 levels) is rendered once into a shared **1024² atlas page** (shelf packer, 8 pages, the oldest page recycled). Then it costs **one draw per object**. Grass yaw is snapped to 16 directions so tufts share impostors. Few large canvases instead of thousands of small ones also keeps iOS memory safe (§4.2).
+3. **A build budget.** At most 24 new impostors per frame. Misses beyond the budget draw live at reduced quality (one draw per slice, no gap filling) until they're cached.
+4. **Interaction quality.** While dragging, during a fling, while scrubbing the time of day, or while cycling the day, every cache key would miss anyway. So draw stacks live, one draw per slice, grass at every other slice, and skip sun shadows. Full quality returns about 1.5 s after release, as the caches refill under the budget.
+5. **A pixel budget.** Pixel ratio capped at 1.5 (painterly art hides it), plus **dynamic resolution**: every 2.5 s, drop the render scale by 0.125 (down to 0.75) if below 45 fps, and raise it again if above 57 fps with under 8 ms of CPU per frame. Any resize clears the caches.
+6. **No full-screen effects per frame.** Paper grain is a static CSS layer (`mix-blend-mode: multiply`) that the browser composites for free. The night or golden tint layer is rebuilt at most 15×/s. Glows are cached radial-gradient sprites drawn with `drawImage`, not new gradients per frame.
+7. **Shadows of movers only, only in their box.** In optimised mode, only the kid and Pip get per-frame sun shadows. Clear, tint and composite only the half-resolution rectangle their shadows can reach. (Note: `source-in` / `destination-in` clear the whole canvas outside the source, so clip to the rectangle first.)
+8. **No allocation in the hot loop.** Reuse the `vis` objects and sort in place, compact arrays in place instead of `filter()`, and cache gradients by key.
+9. **No idle auto-rotation.** A camera that never stops means nothing can be cached. Rotate on input only.
+10. **Measure.** Every prototype shows a frame-time HUD: fps, CPU ms (average and p95), draws per frame, pixel ratio, impostor count, layer rebuilds per second. Test on the cheapest real phone or tablet available.
+
+**Measured** (headless Chromium, **no GPU**, 390×760 at 3× device scale; CPU = JS time per frame; fps capped at 60):
+
+| Scenario | Original: fps / CPU / draws | Optimised: fps / CPU / draws |
+|---|---|---|
+| Day, idle | 6.7 / 18.8 ms / 4,029 | **60 / 3.0 ms / 198** |
+| Golden hour, idle | 5.5 / 42.4 ms / 5,895 | **60 / 6.8 ms / 266** |
+| Night, idle | 6.7 / 13.3 ms / 3,145 | **60 / 3.2 ms / 205** |
+| Walking through the meadow | 6.0 / 32.0 ms / 5,427 | **60 / 3.8 ms / 239** |
+| Windy | 6.7 / 19.0 ms / 4,029 | **60 / 3.1 ms / 176** |
+| Dragging the view | 5.5 / 34.8 ms / 5,493 | **22.5 / 9.1 ms / 1,417** |
+
+After a drag, caches refill in about 1.5 s, with one 0.5 s window averaging 65 ms per frame. The original also renders at pixel ratio 2.0 against 1.5, which accounts for part of the difference.
+
+**Pitfalls found on the way:**
+- Fling decay must be **time-based** (`rotV *= 0.92^(60·dt)`). Per-frame decay at low fps kept the scene in "interacting" mode for seconds.
+- Shared impostor keys only work if the inputs are snapped: rotation, grass yaw, bend and sheen. Continuous values give a cache miss on every frame.
+- With many cache keys (6 sheen levels × fine bend bins), windy weather caused about 180 impostor builds per 0.5 s and 40 ms frames. Coarser bins and 3 sheen levels brought that down to about 18 builds.
+
+**Still slow, and the next lever: WebGL for explore mode.** Dragging is the one case caching can't fix in Canvas 2D: every stack must be redrawn at a new angle. Sprite stacking is the ideal GPU workload: all slices of all models in one texture atlas, every slice an **instanced quad in a single draw call**, the bend and squash in the vertex shader, and shadows as a second instanced pass with a projection matrix. That should make dragging as cheap as idle. Keep Canvas 2D or SVG for the puppet stage and UI.
+
+## 8. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
 - **Everything is `(generator, params, seed)` → a baked bitmap or atlas, cached.** Generate once, play many times.
+- **Performance rules (§7) are the default for every renderer:** cache layers and impostors, snap continuous inputs so caches hit, a draw budget, a pixel budget with dynamic resolution, an interaction-quality mode, no full-screen effects or allocation per frame, and a frame-time HUD. **Plan WebGL instanced stacking for explore mode** in the game.
 - **Content as data, authored by Claude, with checkers:** the musikmodel pattern. Scene documents, character specs and prop lists. The game itself stays offline.
 - **Story:** Ink (inkjs). Don't write a custom format.
 - **Music:** musikmodel's `shared/` modules (no DOM, importable in Node) with adaptive sections per mood. Improve the oscillator trumpet and strings with physical modelling.
@@ -279,7 +323,7 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 - **Kids:** read-aloud with word highlighting, big tap targets, autosave, no timers, no fail states (wrong choices get a funny reaction), no accounts, no analytics, no network during play.
 - **The only asset that is not code-first:** voice acting.
 
-## 8. Open questions
+## 9. Open questions
 
 1. Should the dialogue card stay a 2D overlay, or should puppets pop out of the diorama as Twilight Bugle-style cardboard (Three.js `ExtrudeGeometry` from the SVG paths, with SVG rendered to a texture)?
 2. Should map characters get a thin ink outline for readability?
