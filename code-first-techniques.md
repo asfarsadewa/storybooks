@@ -132,7 +132,42 @@ Real devices with GPU canvas should be much faster. These numbers are only for c
 
 ---
 
-## 5. Decisions so far
+## 5. Baked SVG puppet rig (animating the gouache drawing)
+
+**Prototype:** `06-baked-svg-puppet.html` ("The Night Reader" from §3, animated).
+
+**Why bake:** moving the live SVG would re-run every filter (displacement, turbulence, blur) on every frame, and phones can't keep up. Instead, each part goes through its filters **once**, and the animation moves the resulting bitmaps on a canvas rig. Measured: **43 parts baked in about 0.3 s, then 60 fps** (headless Chromium, no GPU).
+
+**Baking one part:**
+1. In the source SVG, every part is a top-level `<g data-part="name">`. The source SVG stays in the DOM, hidden with `visibility: hidden` (not `display: none`, because `getBBox()` needs layout).
+2. `getBBox()` the part and add a margin for filter overspill (14 units; 30 for the fuzz and blur filters).
+3. Clone the whole SVG. Remove every other `[data-part]`. Set `viewBox` to the part's box and `width`/`height` to box × bake scale. Defs, patterns, clip paths and filters come along, and filter noise stays identical because it lives in user space.
+4. Serialise it to a `data:image/svg+xml` URL, call `Image.decode()`, then draw it into a canvas sized to the box. Store `{ canvas, x, y, w, h }` in drawing units.
+5. Bake 6 parts at a time.
+
+The bake scale is about the display scale (`min(2.4, fit.k × 1.05)`), so bitmaps match screen pixels.
+
+**Authoring rules the drawing must follow:**
+- **Split by motion, not by look.** Anything that moves on its own is its own part: earrings, pom-pom, each steam wisp, each motif, the hedgehog's body, and the hedgehog's eye in each state.
+- **States are sibling parts.** `eyesClosed` / `eyesOpen`, `mouth` / `mouthOpen`, `hhEyeClosed` / `hhEyeOpen`. Draw the extra states up front, even though the still image never shows them.
+- **Draw order ≠ hierarchy.** The hair sits behind the torso but moves with the head. Draw it first, inside the head transform, then draw the torso, then the rest of the head.
+- **Pivots in drawing units:** body (400, 1000) at the bottom edge; head (400, 505) at the neck; pom-pom at its base; earrings at the lobe; hedgehog at its feet.
+
+**Motion:**
+- **Breathing:** scale the body about its bottom edge, `1 + b` vertically and `1 − 0.35 b` horizontally, so volume is roughly kept.
+- **Head:** slow sway plus a tap wobble spring.
+- **Secondary motion:** damped springs (`a = −k·x − c·v + drive`) for the pom-pom, earrings and hair, driven by the head's angular acceleration. They lag and overshoot like real hanging things.
+- **Expression state machine:** eyes are content (closed) by default. Every 4–8 s she opens them, glances toward the hedgehog and blinks, and the hedgehog wakes and peeks back about 0.35 s later. A tap gives surprise (0.35 s) → giggle (open mouth with jaw flutter, blush boost, head wobble, hearts).
+- **Steam:** each wisp rises, sways and fades along a loop. Two copies half a cycle apart keep it continuous.
+- **Hit testing:** invert the page fit into drawing units, then use circles and rectangles per hotspot.
+
+**Pitfalls:**
+- Put `addEventListener('error')` in its own `<script>` before the main one. A syntax error in the main script stops that same script from registering its own error handler, and the page just sits on "loading".
+- Not yet tested on Safari. Rendering an SVG data URL with filters into `Image` should work there, but confirm it.
+
+**Opinion:** this is the stage-mode puppet technique. It's the `twilight-bugle` rig (pivots, attach points, hierarchy) with parts generated from code instead of painted by an image model.
+
+## 6. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
 - **Everything is `(generator, params, seed)` → a baked bitmap or atlas, cached.** Generate once, play many times.
@@ -144,7 +179,7 @@ Real devices with GPU canvas should be much faster. These numbers are only for c
 - **Kids:** read-aloud with word highlighting, big tap targets, autosave, no timers, no fail states (wrong choices get a funny reaction), no accounts, no analytics, no network during play.
 - **The only asset that is not code-first:** voice acting.
 
-## 6. Open questions
+## 7. Open questions
 
 1. Should the dialogue card stay a 2D overlay, or should puppets pop out of the diorama as Twilight Bugle-style cardboard (Three.js `ExtrudeGeometry` from the SVG paths, with SVG rendered to a texture)?
 2. Should map characters get a thin ink outline for readability?
