@@ -154,6 +154,60 @@ The **Fly** button turns the player into a small voxel bird. The chase camera fr
 
 Flight costs the same as dragging. A low-cost tablet is not measured yet.
 
+### 4.8 Style lab (improving the painted look)
+
+**Prototype:** `09-style-lab.html`, a copy of 05 with four bake-time levers. Each lever has a toggle. A model keeps its recipe, so a style change rebakes every model in place and clears every cache.
+
+| Lever | What it does | Cost |
+|---|---|---|
+| Brush | Strokes follow the form. Tops get one painter's direction. Walls get strokes around the form, with bristle lines. The direction comes from a normal estimated from the 3×3×3 occupancy. | Bake only |
+| Light | Warm on the sun side, cool violet in the shade. 4 painted atlases per model, one for each model-local sun direction. The draw picks one from the sun's azimuth minus the object's yaw. | Bake, and 4× painted atlas memory |
+| Outline | A warm-ink edge baked into each impostor. The stack is drawn once, a copy is tinted with `source-in`, the copy is stamped at 8 offsets (radius `0.14 S`, alpha 0.62), and the stack goes on top. Grass gets none. Live draws (drag, fly) get none. | Impostor build only |
+| Corners | Removes convex staircase corners: a voxel with exactly two open sides that touch. A voxel with three or four open sides is a thin feature (a pole, a blade), so it stays. A few top corners stay, so roofs keep a crisp ridge. Thin models (grass, posts) skip this lever. | Bake only |
+
+**Decision:** the author chose **outline + corners**. Brush and light stay in the lab.
+
+**Measured** (iPhone 14 Pro, Safari, pixel ratio 1.5, `?bench`):
+
+| Scenario | Plain: fps / slow frames | Outline + corners: fps / slow frames |
+|---|---|---|
+| Day idle | 60 / 0% | 60 / 0% |
+| Golden hour, night | — | 60 / 0% |
+| Windy | — | 58 / 2% |
+| Dragging | 60 / 0% (1,385 draws) | 60 / 0% (1,352 draws) |
+| Flying | — | 60 / 0% |
+| Refill after a drag | 53 / 3%, one 282 ms frame | 53 / 4%, one 295 ms frame |
+
+- Outline + corners costs nothing measurable. Corners remove voxels, so draws go down a little.
+- Rebaking the whole scene in a new style takes 1.0–1.4 s on the phone (66–190 ms headless).
+- At pixel ratio 1, brush and light are hard to see. The first brush strength (`0.8 + 0.3 b`) was invisible on a phone-size screen. `0.7 + 0.46 b + 0.12 ridge` shows.
+- **New finding, not caused by the style: one frame of about 0.3 s right after a drag ends, in both styles.** Earlier benches did not measure this moment.
+
+**The freeze after a drag: cause and fix** (3 more bench runs on the same iPhone, `?bench` reports the slowest frame of each scenario):
+
+| Refill after a drag | Worst frame | Slow frames | What the worst frame did |
+|---|---|---|---|
+| As in prototype 05 | 300 ms | 4% | 24 impostor builds + every static sun shadow (3,448 draws) |
+| No static shadows (diagnostic) | 84 ms | 4% | 24 impostor builds |
+| Progressive shadows | 164 ms | 3% | 24 builds + 500 shadow slices |
+| + a shared offscreen budget (300 slices) | 66 ms | 7% | 15–24 builds of small grass tufts |
+| **+ at most 6 builds per frame** | **52 ms** | **3%** | 1 build, live draws (first frame after the drag) |
+| The same at golden hour | 40 ms | 4% | |
+
+- **Two causes.** All the work fell in the first frame after the drag: the impostor refill (24 builds) and the full static shadow pass.
+- **On Safari, an impostor build has a fixed cost.** Small grass tufts fit the slice budget, but 15–24 of them still cost 60–100 ms. Limit the number of builds, not only the slices.
+- **Progressive static shadows:** draw the slices from the already-tinted dark atlas. An ellipse clip replaces `destination-in`, so there is no composite chain. Spread the slices over frames, and fade the finished buffer in over about 0.25 s.
+- **Order the work.** Impostors build first, at most 6 per frame and within a shared budget of 300 offscreen slices per frame. Objects still waiting draw live, which is cheap (dragging is 1,385 live draws at 60 fps). The static shadows continue only in frames where no impostor is waiting.
+- 12 builds per frame gave the same worst frame (49 ms) but more slow frames (9%). 6 is the setting.
+- Add this as performance rule 11 (§7): **one offscreen budget per frame, counted in builds and in slices.**
+
+**In the engine** (`storybook-game`: outline and corners on by default, rule 11, progressive static shadows; iPhone 14 Pro, 20 scenarios):
+- Idle, golden hour, night, windy, dragging and flying: 59.7–60 fps, 0–1% slow frames.
+- Refill after a drag: day 50 ms worst frame and 3% slow frames, golden hour 40 ms and **6%**.
+- The kid in the lamp pool: **9%** slow frames (4% before the house style). The mover lamp shadows and the outline builds now share frames.
+- The kid has no outline. The renderer draws the player live, and the outline is baked into impostors only. The player needs a live outline.
+- These three are the open items for the house style.
+
 ---
 
 ## 5. Baked SVG puppet rig (animating the gouache drawing)
@@ -312,6 +366,7 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 8. **No allocation in the hot loop.** Reuse the `vis` objects and sort in place, compact arrays in place instead of `filter()`, and cache gradients by key.
 9. **No idle auto-rotation.** A camera that never stops means nothing can be cached. Rotate on input only.
 10. **Measure.** Every prototype shows a frame-time HUD: fps, CPU ms (average and p95), draws per frame, pixel ratio, impostor count, layer rebuilds per second. Test on the cheapest real phone or tablet available.
+11. **One offscreen budget per frame.** All drawing into offscreen canvases (impostor builds, shadow buffers) shares one budget: at most 6 impostor builds and 300 slices per frame. Work over the budget waits for a later frame. Order it: impostors first, static shadows only when no impostor waits. Measure the frame right after an interaction ends (§4.8).
 
 **Measured** (headless Chromium, **no GPU**, 390×760 at 3× device scale; CPU = JS time per frame; fps capped at 60):
 
