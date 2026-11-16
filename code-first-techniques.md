@@ -130,6 +130,30 @@ Also: memoise identical models, defer the heavy build behind a "Painting…" mes
 
 Real devices with GPU canvas should be much faster. These numbers are only for comparing versions. If needed: cache shadows of static objects (they only change with rotation or time), and only re-shadow movers and swaying grass.
 
+### 4.7 Flight mode (chase camera over the diorama)
+
+The **Fly** button turns the player into a small voxel bird. The chase camera from prototype 01 follows it. The button changes to **Land**.
+
+- **Camera:** the heading points up the screen (`rot = −π/2 − heading`). The camera follows with a lag (gain 3.5 per second), so a hard turn shows about 20° of trail.
+- **Pan:** `proj()` subtracts a camera point `(camX, camY)`. Every use of the slab centre now goes through `proj(0, 0)`. The cache keys of the static layer, the night layer and the lamp layer include the pan.
+- **Zoom ×1.8 in flight:** `S = S0 · zoom`. Impostors are cached at zoom 1 only. So any zoom other than 1 counts as interacting, and stacks draw live at the current scale. The zoom costs no extra draws.
+- **Camera aim:** the altitude lifts the bird up the screen. The camera aims ahead of the bird's ground point by `4 + 0.8 · alt · 0.92 / q` units. That keeps the bird near the middle of the screen. The first version aimed at the ground point, and the bird sat at the top edge.
+- **Landing:** the pan and zoom ease back. They snap to exactly 0 and 1, so the caches hit again. Headless, this takes 2.0 s, and then the draws return to the idle count.
+- **Drawing:** the bird flies above every prop (26 units, the trees reach 22). So it draws after all stacks, and it needs no sorting. Its shadow is a soft blob on the slab that shrinks with altitude.
+- **Model:** 3 baked wing frames (up, spread, down). It flaps for 1.4 s, then glides for 1 s. It is built ×1.6 with chunkier voxels (R = 2), because at R = 3 and real size it was too small on a phone.
+- **Steering:** the left or right half of the screen turns the bird. With no input, the bird glides in a slow circle. Within 10 units of the rim, the steering blends into a turn back toward the middle.
+- **Edge cases:** sun shadows and lamp shadows switch off while flying, as during a drag. Taps steer, so they cannot walk the kid or start hotspots. Autosave should restore the kid on foot.
+
+**Measured** (iPhone 14 Pro, Safari, pixel ratio 1.5, `?bench`):
+
+| Scenario | fps | Frame p95 | Slow frames | JS CPU | Draws |
+|---|---|---|---|---|---|
+| Day flying | 60 | 17 ms | 0% | 4.1 ms | 1,461 |
+| Night flying | 60 | 17 ms | 0% | 3.8 ms | 1,477 |
+| Day dragging (for comparison) | 60 | 17 ms | 0% | 3.7 ms | 1,385 |
+
+Flight costs the same as dragging. A low-cost tablet is not measured yet.
+
 ---
 
 ## 5. Baked SVG puppet rig (animating the gouache drawing)

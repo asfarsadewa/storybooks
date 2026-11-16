@@ -25,10 +25,13 @@ This is the musikmodel pattern: brief → document → checker → renderer. Eve
 
 ## 2. Scope of book one
 
-- 3 or 4 scenes. One diorama style. One prop library.
-- 3 characters. One of them is the player character.
-- About 10 minutes of play.
-- Explore mode (the diorama) and stage mode (the puppet card). Tapping a character or a hotspot changes the mode.
+Book one is *The Adventure of Kai the Brave*. Its design is in `book-one-kai.md`.
+
+- 3 scenes: the meadow, the crash site and Valda.
+- 3 characters. Kai is the player character. The Skylark is a fourth figure for flight.
+- 7 puzzles on 4 puzzle engines (§5.7).
+- About 20 minutes of play. Reading age 10 to 12.
+- Explore mode (the diorama), stage mode (the puppet card), puzzle mode and flight mode (the meadow only). Tapping a character or a hotspot changes the mode.
 
 ## 3. Stages
 
@@ -48,6 +51,7 @@ book/                     one folder per book
   cast/<id>.json          character spec
   cast/<id>.svg           stage puppet
   scenes/<id>.json        diorama layout
+  puzzles/<id>.json       puzzle (generator, params, seed)
   music/<mood>.json       musikmodel score
   ui.json                 interface strings (ASD-STE100)
 engine/                   runtime modules (§6)
@@ -64,14 +68,14 @@ test/                     checker tests and headless screenshot tests
 
 ```json
 {
-  "id": "lantern",
-  "title": "The Lantern by the Bridge",
-  "readingAge": [5, 8],
+  "id": "kai",
+  "title": "The Adventure of Kai the Brave",
+  "readingAge": [10, 12],
   "start": "start",
-  "player": "mira",
-  "cast": ["mira", "pip", "hoot"],
-  "scenes": ["meadow", "bridge", "hollow"],
-  "music": { "calm": "music/calm.json", "night": "music/night.json" },
+  "player": "kai",
+  "cast": ["kai", "tako", "zarbor", "skylark"],
+  "scenes": ["meadow", "crash", "valda"],
+  "music": { "meadow": "music/meadow.json", "ship": "music/ship.json", "valda": "music/valda.json", "heartsong": "music/heartsong.json" },
   "seed": 1
 }
 ```
@@ -92,6 +96,7 @@ All words in the book live in Ink. A line with no `by` tag is narration. Tags cu
 | `time` | `morning`, `midday`, `golden`, `night` | Sets the time of day. |
 | `music` | mood id | Changes the music to this mood. |
 | `sfx` | sound id | Plays a sound from the engine's sound list. |
+| `puzzle` | puzzle id | Opens the puzzle. The story continues when the child solves it. |
 
 A knot that ends with `-> DONE` closes the stage card. The child is then back in explore mode. Hotspots (§5.5) start knots.
 
@@ -128,7 +133,7 @@ Story text is the voice of the fiction. ASD-STE100 does not apply to it. The kid
 ```
 
 - `voice` uses the babble parameters from prototype 08.
-- `map.figure` picks a voxel figure generator from the engine. Book one has `child` and `quadruped-small`. The colours come from the spec. Nobody draws the map figure.
+- `map.figure` picks a voxel figure generator from the engine. Book one has `child`, `quadruped-small` and `bird-small` (for flight). The colours come from the spec. Nobody draws the map figure.
 - `bones` is the rig. A bone has a pivot in drawing units, an optional parent, the parts it moves and its motion presets.
 - **Draw order is the SVG document order. The hierarchy is the bones.** These are two separate things. The hair can draw behind the torso and still move with the head (§5 of the findings).
 
@@ -165,6 +170,7 @@ Motion presets in book one: `breathe`, `sway`, `tapWobble`, `blink`, `lookAt`, `
   "water": [{ "kind": "pond", "circle": [-27, 20, 12] }],
   "path": { "points": [[-2, -14], [10, 10], [30, 50]], "width": 5 },
   "lights": [{ "kind": "lamp", "prop": "lamp", "reach": 30, "shadows": true }],
+  "flight": { "figure": "bird-small", "altitude": 26, "zoom": 1.8 },
   "markers": { "door": [-2, -12], "lamp": [32, 42] },
   "cast": [{ "id": "mira", "at": [16, 6] }, { "id": "pip", "at": [28, 13] }],
   "hotspots": [{ "id": "pip", "target": "cast:pip", "knot": "meet_pip" }]
@@ -175,10 +181,40 @@ Motion presets in book one: `breathe`, `sway`, `tapWobble`, `blink`, `lookAt`, `
 - `kind` names a prop generator in the engine library. Book one has the props from prototype 05: `cottage`, `pine`, `roundTree`, `mushroom`, `lantern`, `post`, `reed`, `grass`. A new prop is an engine change.
 - `scatter` places grass by rule. The rules keep grass away from the path, the water and other props, as prototype 05 does.
 - The `seed` makes every placement and every model deterministic.
+- `flight` is optional. If it is present, the scene shows the **Fly** button. The player becomes a small bird with a chase camera (§4.7 of the findings). Flight is free play: the bird starts no knots and has no goal. The `altitude` must be higher than the tallest prop.
 
 ### 5.6 `ui.json`
 
 Every interface string: buttons, hints, menus, save messages and errors. It follows ASD-STE100. The checker scans it (§7).
+
+### 5.7 `puzzles/<id>.json`
+
+A puzzle is data for one of the puzzle engines. The generator makes the board from `params` and `seed`. The author can also give a fixed `board`.
+
+```json
+{
+  "id": "power_path",
+  "engine": "tiles",
+  "generator": "pipes",
+  "params": { "cols": 5, "rows": 5, "variant": "power", "minMoves": 8 },
+  "seed": 314,
+  "hints": ["The hatch needs power from the left.", "Corner tiles turn the flow."]
+}
+```
+
+Puzzle engines in book one:
+
+| Engine | What the child does | Book one uses it for |
+|---|---|---|
+| `dials` | Turns dials to match sounds or symbols | The translator |
+| `tiles` | Turns tiles to connect a flow. Variants: power, stars, light | The power path, the star map, the crystal caves |
+| `deduce` | Chooses items or answers that fit every clue | The workbench, the three trials |
+| `sequence` | Repeats or orders a sequence of sounds | The Heartsong |
+
+Kid rules for puzzles:
+- There is no fail state and no timer. A wrong move is undone with a funny reaction.
+- After about 60 s without progress, the puzzle offers a hint. The child can ask for a hint at any time.
+- The child can leave a puzzle and come back. The board keeps its state.
 
 ## 6. Engine modules
 
@@ -190,8 +226,10 @@ Every interface string: buttons, hints, menus, save messages and errors. It foll
 | `scene` | 05: object list, scatter, pond, path | **New:** load a scene document |
 | `light` | 05: time of day, sun shadows, night layer, lamp-shadow cache | Lights from the scene document |
 | `walk` | 05: tap to walk, obstacles, wading | Walk to markers for the `walk` tag |
+| `flight` | 05: Fly mode, chase camera, pan and zoom, `bird-small` figure | Read the `flight` block of the scene document |
 | `puppet` | 06: part baker, springs, expressions | **New:** a rig player driven by `bones` |
 | `voice` | 08: babble, prosody, text sync | None |
+| `puzzle` | — | **New:** 4 puzzle engines, a generator for each, and the `puzzle` tag |
 | `music` | musikmodel `shared/` | Vendored copy |
 | `story` | — | **New:** inkjs runner and tag dispatcher |
 | `cache` | — | **New:** bakes in IndexedDB, keyed by `hash(generatorVersion, params, seed)` |
@@ -216,7 +254,7 @@ The performance rules in §7 of the findings apply to every module.
 - Every knot ends with a choice, a divert or `-> DONE`. No knot is a dead end.
 
 **Kid rules** (provisional limits)
-- A story line has 25 words or fewer.
+- A story line has 30 words or fewer (reading age 10 to 12).
 - A choice has 8 words or fewer.
 - A choice point has 3 choices or fewer.
 - No choice ends the story badly. Every path reaches an ending.
@@ -228,11 +266,18 @@ The performance rules in §7 of the findings apply to every module.
 - Pivots and hotspots are inside the `viewBox`.
 - Voice parameters are inside the ranges of prototype 08.
 
+**Puzzles**
+- Every puzzle that a `puzzle` tag names exists.
+- **The solver solves every puzzle.** It reports the fewest moves. That number must be at least `minMoves`, so the puzzle is not trivial.
+- A `dials` puzzle has exactly one solution. A `deduce` puzzle has exactly one answer that fits every clue.
+- Every puzzle has at least 2 hints.
+
 **Scene**
 - Every `kind` is in the prop library.
 - Props, cast and markers stand on the slab. They do not stand in the water.
 - Every hotspot target exists. Every hotspot knot exists.
 - Each marker can be reached on foot from where the player starts.
+- If the scene has `flight`, its altitude is higher than every prop.
 - **Performance budget** (§8).
 
 **Interface copy**
@@ -278,10 +323,11 @@ The checker prints each measure as a percentage of the reference. After the tabl
 | Step | Result | Proves |
 |---|---|---|
 | M0 | Game repo. The 05 meadow loads from `scenes/meadow.json`. | A scene document costs no performance. The bench matches prototype 05 on iPhone. |
-| M1 | Mira's puppet plays from `cast/mira.json` and `mira.svg`. | The data rig works. **Safari bakes SVG filters.** |
+| M1 | Tako's puppet plays from `cast/tako.json` and `tako.svg`. | The data rig works. **Safari bakes SVG filters.** |
 | M2 | One Ink knot plays end to end: hotspot → stage → babble → choice → explore. | The tag dispatcher works. |
-| M3 | Every checker in §7. | Claude can write documents that the build accepts. |
-| M4 | Book one: every scene, character and ending. Offline PWA. | The pipeline makes a book. |
+| M3 | The `tiles` engine with its generator and solver. The power path plays from `puzzles/power_path.json`. | A puzzle document plays, and the checker proves it can be solved. |
+| M4 | Every checker in §7, and the other 3 puzzle engines. | Claude can write documents that the build accepts. |
+| M5 | Book one: every scene, character, puzzle and ending. Offline PWA. | The pipeline makes a book. |
 
 Test M1 on the iPhone in its first week. Safari SVG baking is the biggest risk that has not been tested.
 

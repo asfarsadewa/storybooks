@@ -36,6 +36,7 @@
   <button id="crisp">Crisp</button>
   <button id="windy">Windy</button>
   <button id="optBtn" class="on">⚡ Optimised</button>
+  <button id="flyBtn">Fly</button>
 </div>
 <div id="timebar" style="position:fixed;left:50%;bottom:40px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(255,250,240,.85);padding:6px 12px;border-radius:999px;box-shadow:0 2px 0 #d8c9ad;z-index:5;font-size:13px;font-weight:700">
   <span id="todlabel" style="width:74px">Afternoon</span>
@@ -111,11 +112,12 @@ const PERF = { draws: 0, builds: 0, rebuilds: 0, evict: 0, frame: [], gap: [], l
 
 // ============ canvas ============
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-let W, H, DPR, S;
+let W, H, DPR, S, S0, zoom = 1;   // S = S0 * zoom; zoom is 1 except in flight
 function resize(){
   DPR = targetDPR();
   W = cv.width = Math.floor(innerWidth * DPR); H = cv.height = Math.floor(innerHeight * DPR);
-  S = Math.min(innerWidth / 130, innerHeight / 140) * DPR;      // screen px per world unit
+  S0 = Math.min(innerWidth / 130, innerHeight / 140) * DPR;     // screen px per world unit
+  S = S0 * zoom;
   if (PERF.cacheReady) clearCaches();
 }
 addEventListener('resize', resize); resize();
@@ -311,6 +313,24 @@ const hedgehog = buildModel(8, 7, 5, 3, (u, v, w) => {
   if (w < 0.6 && Math.hypot(x, y) < 2) return P.peach;
   return null;
 }, { seed: 9 });
+// A small bird for flight mode, facing +x. Frame f: 0 = wings up, 1 = spread, 2 = down.
+// Built 1.6x larger than its design units (chunkier voxels: R = 2) so it reads at phone size.
+const BIRD_K = 1.6;
+const bird = memo((f) => buildModel(10 * BIRD_K, 10 * BIRD_K, 6 * BIRD_K, 2, (u, v, w) => {
+  const x = u / BIRD_K - 5, y = v / BIRD_K - 5, z = w / BIRD_K - 2.6;
+  if (Math.hypot((x - 2.3) / 0.9, y / 0.85, (z - 0.5) / 0.85) < 1){                               // head
+    if (x > 2.6 && Math.abs(y) > 0.35 && Math.abs(y) < 0.7 && z > 0.5 && z < 1) return P.ink;      // eyes
+    return P.teal; }
+  if (x > 3 && x < 3.9 && Math.abs(y) < 0.3 && Math.abs(z - 0.4) < 0.25) return P.mustard;          // beak
+  if (Math.hypot(x / 2.3, y / 1.05, z / 0.95) < 1) return z < -0.25 ? P.cream : P.teal;             // body, pale belly
+  if (x < -1.8 && x > -3.6 && Math.abs(y) < 0.4 + (-1.8 - x) * 0.35 && Math.abs(z - 0.2) < 0.3) return P.brown;  // tail fan
+  const ay = Math.abs(y);
+  if (ay > 0.8 && ay < 4.7){                                                                        // wings: tips rise or fall with the frame
+    const tipZ = [1.6, 0.15, -1.2][f] * (ay - 0.8) / 3.9, chord = 1.25 - (ay - 0.8) * 0.18;
+    if (Math.abs(x - 0.2) < chord && Math.abs(z - tipZ) < 0.32) return ay > 3.6 ? P.ink : P.brown;
+  }
+  return null;
+}, { seed: 12 }));
 
 // ---- placing the scene (world units, diorama centre = 0,0) ----
 const objs = [
@@ -414,6 +434,46 @@ function splash(x, y, n){ for (let i = 0; i < n; i++){ const a = Math.random() *
 // simple round obstacles the walker slides around: [x, y, radius]
 const OBST = [[objs[0].x, objs[0].y, 11]].concat(objs.filter(o => o.m !== girl && !o.hedgehog && !o.grass && o.m !== reed && o.m.X / o.m.R > 4).map(o => [o.x, o.y, Math.min(o.m.X, o.m.Y) / o.m.R * 0.3]));
 let marker = null;
+// ---- flight mode: a chase camera follows a small bird, as in prototype 01 ----
+// The camera turns with the bird's heading, so every frame counts as "interacting" (cache misses).
+const FLY = { on: false, x: 0, y: 0, hd: 0, alt: 0, steer: 0, key: 0, t: 0 };
+const FLY_ALT = 26, FLY_SPEED = 16, FLY_TURN = 1.7, FLY_GLIDE = 0.3, FLY_ZOOM = 1.8;
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+function setFly(on){
+  if (on === FLY.on) return;
+  FLY.on = on; FLY.steer = 0;
+  if (on){ FLY.x = GIRL.x; FLY.y = GIRL.y; FLY.hd = GIRL.yaw; FLY.alt = 4; GIRL.walking = false; down = null; }
+  $('flyBtn').textContent = on ? 'Land' : 'Fly'; $('flyBtn').classList.toggle('on', on);
+  $('hint').textContent = on ? 'Tap the left or right side to turn.' : HINT; $('hint').style.opacity = 1;
+}
+function flyStep(dt){
+  if (FLY.on){
+    let steer = FLY.steer || FLY.key;
+    if (!steer) steer = FLY_GLIDE;                                   // no input: glide in a slow circle
+    const r = Math.hypot(FLY.x, FLY.y);
+    if (r > GR - 10){                                                // near the rim: turn back toward the middle
+      const back = wrapA(Math.atan2(-FLY.y, -FLY.x) - FLY.hd), k = Math.min(1, (r - GR + 10) / 6);
+      steer = steer * (1 - k) + Math.sign(back) * k;
+    }
+    FLY.hd = wrapA(FLY.hd + steer * FLY_TURN * dt);
+    FLY.x += Math.cos(FLY.hd) * FLY_SPEED * dt; FLY.y += Math.sin(FLY.hd) * FLY_SPEED * dt;
+    FLY.alt += (FLY_ALT - FLY.alt) * Math.min(1, dt * 1.5); FLY.t += dt;
+    zoom += (FLY_ZOOM - zoom) * Math.min(1, dt * 2);
+    // camera: heading points up the screen (rot = -pi/2 - heading), with a little lag so the turn shows
+    rotIn += wrapA(-Math.PI / 2 - FLY.hd - rotIn) * Math.min(1, dt * 3.5); rotV = 0;
+    // aim ahead of the bird's ground point: ahead is up the screen, and the altitude lifts the bird up too,
+    // so this brings the drawn bird back near the middle of the screen
+    const lead = 4 + 0.8 * FLY.alt * 0.92 / q, tx = FLY.x + Math.cos(FLY.hd) * lead, ty = FLY.y + Math.sin(FLY.hd) * lead, k = Math.min(1, dt * 3);
+    camX += (tx - camX) * k; camY += (ty - camY) * k;
+  } else if (camX || camY){                                          // after landing: ease the view back to the slab
+    const k = Math.min(1, dt * 4); camX -= camX * k; camY -= camY * k;
+    if (Math.hypot(camX, camY) < 0.02){ camX = 0; camY = 0; }       // exactly 0 again, so the caches hit
+  }
+  if (!FLY.on && zoom !== 1){ zoom += (1 - zoom) * Math.min(1, dt * 4); if (Math.abs(zoom - 1) < 0.002) zoom = 1; }
+  S = S0 * zoom;   // impostors are cached at zoom 1 only; any other zoom counts as interacting
+}
+// wings: flap for 1.4 s, then glide with spread wings for 1 s
+const birdFrame = t => (t % 2.4) < 1.4 ? [0, 1, 2, 1][Math.floor(t * 10) % 4] : 1;
 const HEDGE = objs.find(o => o.hedgehog), CHIMNEY = { x: -2 + 3.3 * 0, y: -24 + 3.3, h: 18 };
 // chimney position in world: cottage local (x≈3.3, y≈3) rotated by yaw
 { const c = Math.cos(objs[0].yaw), s = Math.sin(objs[0].yaw), lx = 3.3, ly = 3; CHIMNEY.x = objs[0].x + lx * c - ly * s; CHIMNEY.y = objs[0].y + lx * s + ly * c; }
@@ -427,6 +487,7 @@ const grainPat = ctx.createPattern(grain, 'repeat');
 { const ov = document.getElementById('grainOv'); ov.style.backgroundImage = `url(${grain.toDataURL()})`; ov.style.backgroundSize = '256px 256px'; }
 
 // ============ state & input ============
+let camX = 0, camY = 0;   // chase-camera pan, in world units
 let painted = true, rot = -0.5, rotIn = -0.5, rotV = 0, idle = 0, t0 = performance.now(), last = t0;
 const q = 0.62;                 // ground tilt (vertical squash of the floor)
 const $ = id => document.getElementById(id);
@@ -437,14 +498,21 @@ $('tod').addEventListener('input', () => { PERF.todInput = performance.now(); })
 $('optBtn').onclick = () => { OPT = !OPT; $('optBtn').classList.toggle('on', OPT); $('optBtn').textContent = OPT ? '⚡ Optimised' : 'Original'; renderScale = 1; resize(); clearCaches(); };
 $('painted').onclick = () => { painted = true; $('painted').classList.add('on'); $('crisp').classList.remove('on'); };
 $('crisp').onclick = () => { painted = false; $('crisp').classList.add('on'); $('painted').classList.remove('on'); };
+const HINT = $('hint').textContent;
+$('flyBtn').onclick = () => setFly(!FLY.on);
 let down = null, moved = 0;
-cv.addEventListener('pointerdown', e => { down = { x: e.clientX, r: rotIn }; moved = 0; idle = 0; });
-addEventListener('pointermove', e => { if (!down) return; const dx = e.clientX - down.x; moved = Math.max(moved, Math.abs(dx)); const nr = down.r + dx * 0.008; rotV = (nr - rotIn); rotIn = nr; });
-addEventListener('pointerup', e => { if (down && moved < 8) tap(e.clientX * DPR, e.clientY * DPR); down = null; });
+// flight: the left or right half of the screen steers; keys work too
+const flySide = x => x < innerWidth / 2 ? -1 : 1;
+addEventListener('keydown', e => { if (e.key === 'ArrowLeft') FLY.key = -1; else if (e.key === 'ArrowRight') FLY.key = 1; });
+addEventListener('keyup', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') FLY.key = 0; });
+cv.addEventListener('pointerdown', e => { if (FLY.on){ FLY.steer = flySide(e.clientX); return; } down = { x: e.clientX, r: rotIn }; moved = 0; idle = 0; });
+addEventListener('pointermove', e => { if (FLY.on){ if (FLY.steer) FLY.steer = flySide(e.clientX); return; } if (!down) return; const dx = e.clientX - down.x; moved = Math.max(moved, Math.abs(dx)); const nr = down.r + dx * 0.008; rotV = (nr - rotIn); rotIn = nr; });
+addEventListener('pointerup', e => { if (FLY.on){ FLY.steer = 0; return; } if (down && moved < 8) tap(e.clientX * DPR, e.clientY * DPR); down = null; });
 
 // ============ render ============
 let hedgeScreen = [0, 0];
-function proj(x, y){ const c = Math.cos(rot), s = Math.sin(rot); const xr = x * c - y * s, yr = x * s + y * c; return [W / 2 + xr * S, H * 0.54 + yr * S * q, yr]; }
+// camX, camY: the world point at the slab's usual screen centre (0, 0 unless the chase camera pans)
+function proj(x, y){ const c = Math.cos(rot), s = Math.sin(rot); x -= camX; y -= camY; const xr = x * c - y * s, yr = x * s + y * c; return [W / 2 + xr * S, H * 0.54 + yr * S * q, yr]; }
 let DRAW = null;   // when set, drawStack draws into this context instead of the screen
 function drawStack(m, sx, sy, yaw, lift, alpha = 1, minZ = 0, bx = 0, by = 0, hs = 1, thin = false, sheen = 0, dark = 0){
   const cr = Math.cos(rot), sr = Math.sin(rot);
@@ -609,7 +677,7 @@ function drawSunShadows(vis, E, T = ctx, region = false){
   shX.globalCompositeOperation = 'source-in'; shX.fillStyle = SHADOW_COL; shX.fillRect(x0, y0, rw, rh);
   // shadows only land on the slab top (the slab casts its own onto the table)
   shX.globalCompositeOperation = 'destination-in'; shX.beginPath();
-  shX.ellipse(W / 2 / kx, (H * 0.54 - GH * S * 0.92) / ky, GR * S / kx - 1, GR * S * q / ky - 1, 0, 0, 7); shX.fill();
+  const [c0x, c0y] = proj(0, 0); shX.ellipse(c0x / kx, (c0y - GH * S * 0.92) / ky, GR * S / kx - 1, GR * S * q / ky - 1, 0, 0, 7); shX.fill();
   shX.restore(); shX.globalCompositeOperation = 'source-over';
   T.setTransform(1, 0, 0, 1, 0, 0); T.imageSmoothingEnabled = true;
   T.globalAlpha = 0.4 * E.sunK; T.drawImage(shC, x0, y0, rw, rh, x0 * kx, y0 * ky, rw * kx, rh * ky); T.globalAlpha = 1; PERF.draws++;
@@ -668,7 +736,7 @@ const lsSC = document.createElement('canvas'), lsSX = lsSC.getContext('2d');
 let lampKey = '', lampStatics = null;
 function lampShadowLayer(vis, E, tint){
   half(lsSC);
-  const key = rot.toFixed(5) + '|' + W + '|' + H + '|' + tint;
+  const key = rot.toFixed(5) + '|' + camX.toFixed(2) + '|' + camY.toFixed(2) + '|' + zoom.toFixed(4) + '|' + W + '|' + H + '|' + tint;
   if (key !== lampKey){
     lampKey = key; PERF.rebuilds++;
     if (!lampStatics) lampStatics = objs.filter(o => !isMover(o)).map(o => ({ o, sx: 0, sy: 0, bx: 0, by: 0, hs: 1, minZ: 0 }));
@@ -705,7 +773,7 @@ function drawLighting(vis, E, t){
   if (tintAmt < 0.01) return;
   let t0p = performance.now();
   if (KNOB.nightLayer){
-    const key = rot + '|' + Math.round(tod * 400) + '|' + W + '|' + H;
+    const key = rot + '|' + camX + '|' + camY + '|' + zoom + '|' + Math.round(tod * 400) + '|' + W + '|' + H;
     const rebuild = !OPT || key !== lightKey || t - lightT > 1 / 15;
     if (rebuild){ lightKey = key; lightT = t; buildNight(vis, E, t, lift0); }
     let t1p = performance.now(); PERF.ph.nightBuild += t1p - t0p; t0p = t1p;
@@ -773,14 +841,14 @@ function compact(arr, keep){ let j = 0; for (let i = 0; i < arr.length; i++) if 
 // Everything on the ground that doesn't move: table shadow, slab, contact blobs, sun shadows of static things.
 // Rebuilt only when rotation, time of day, size or style change. While dragging, it skips the shadows.
 function drawStaticLayer(E, interacting, lift0){
-  const key = rot.toFixed(5) + '|' + Math.round(tod * 200) + '|' + painted + '|' + W + '|' + H + '|' + (interacting ? 0 : 1);
+  const key = rot.toFixed(5) + '|' + camX.toFixed(2) + '|' + camY.toFixed(2) + '|' + zoom.toFixed(4) + '|' + Math.round(tod * 200) + '|' + painted + '|' + W + '|' + H + '|' + (interacting ? 0 : 1);
   if (key !== layerKey){
     layerKey = key; PERF.rebuilds++;
     if (layerC.width !== W || layerC.height !== H){ layerC.width = W; layerC.height = H; }
     const L = layerX; L.setTransform(1, 0, 0, 1, 0, 0); L.clearRect(0, 0, W, H);
     { const cr = Math.cos(rot), sr = Math.sin(rot), o2 = E.sunK * GH * 0.5, ox = (E.shX * cr - E.shY * sr) * S * o2, oy = (E.shX * sr + E.shY * cr) * S * q * o2;
-      L.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; L.beginPath(); L.ellipse(W / 2 + ox, H * .54 + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); L.fill(); }
-    DRAW = L; drawStack(ground, W / 2, H * .54, 0, 0); DRAW = null;
+      const [c0x, c0y] = proj(0, 0); L.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; L.beginPath(); L.ellipse(c0x + ox, c0y + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); L.fill(); }
+    { const [c0x, c0y] = proj(0, 0); DRAW = L; drawStack(ground, c0x, c0y, 0, 0); DRAW = null; }
     const statics = [];
     for (const o of objs){ if (isMover(o)) continue; const [sx, sy] = proj(o.x, o.y); statics.push({ o, sx, sy: sy - lift0, bx: 0, by: 0, hs: 1, minZ: 0 }); }
     L.setTransform(1, 0, 0, 1, 0, 0); L.fillStyle = `rgba(40,50,40,${.1 + .1 * (1 - E.sunK)})`;
@@ -819,9 +887,10 @@ function frame(now){
   const E = environment(tod);
   $('todlabel').textContent = tod < .12 ? 'Morning' : tod < .45 ? 'Midday' : tod < .6 ? 'Afternoon' : tod < .69 ? 'Golden hour' : tod < .76 ? 'Sunset' : 'Night';
   // optimised mode doesn't spin on its own: a constantly moving camera means nothing can ever be cached
+  flyStep(dt);
   if (!down){ rotIn += rotV; rotV *= Math.pow(0.92, dt * 60); if (Math.abs(rotV) < 2e-3) rotV = 0; idle += dt; if (!OPT && idle > 3 && !GIRL.walking) rotIn += dt * 0.12; }
   rot = OPT ? Math.round(rotIn / ASTEP) * ASTEP : rotIn;
-  interacting = OPT && ((down && moved > 4) || rotV !== 0 || performance.now() - (PERF.todInput || 0) < 250 || cycling);
+  interacting = OPT && (FLY.on || camX !== 0 || camY !== 0 || zoom !== 1 || (down && moved > 4) || rotV !== 0 || performance.now() - (PERF.todInput || 0) < 250 || cycling);
   // ---- walk the kid towards her target ----
   if (GIRL.walking){
     const dx = GIRL.tx - GIRL.x, dy = GIRL.ty - GIRL.y, d = Math.hypot(dx, dy);
@@ -878,7 +947,7 @@ function frame(now){
   // floating motifs (behind)
   for (const m of motifs){
     const x = m.x * W, y = (m.y * H + Math.sin(t * m.sp + m.ph) * 12 * DPR);
-    if (Math.hypot(x - W / 2, (y - H * .54) / q * 0.7) < GR * S * 0.95) continue;
+    { const [c0x, c0y] = proj(0, 0); if (Math.hypot(x - c0x, (y - c0y) / q * 0.7) < GR * S * 0.95) continue; }
     ctx.fillStyle = m.c; ctx.globalAlpha = .85;
     if (m.k === 0) star(x, y, m.r * DPR, t * .2 + m.ph); else if (m.k === 1) sparkle(x, y, m.r * DPR * 1.1); else { ctx.beginPath(); ctx.arc(x, y, m.r * .45 * DPR, 0, 7); ctx.fill(); }
     ctx.globalAlpha = 1;
@@ -890,8 +959,8 @@ function frame(now){
   else {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   { const cr = Math.cos(rot), sr = Math.sin(rot), o2 = E.sunK * GH * 0.5, ox = (E.shX * cr - E.shY * sr) * S * o2, oy = (E.shX * sr + E.shY * cr) * S * q * o2;
-    ctx.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; ctx.beginPath(); ctx.ellipse(W / 2 + ox, H * .54 + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); ctx.fill(); }
-  drawStack(ground, W / 2, H * .54, 0, 0);
+    const [c0x, c0y] = proj(0, 0); ctx.fillStyle = `rgba(60,45,70,${.12 + .1 * E.sunK})`; ctx.beginPath(); ctx.ellipse(c0x + ox, c0y + 6 * DPR + oy, GR * S * 1.02, GR * S * q * 1.02, 0, 0, 7); ctx.fill(); }
+  { const [c0x, c0y] = proj(0, 0); drawStack(ground, c0x, c0y, 0, 0); }
   }
 
   // ripples: rings on the water surface, clipped to the pond so they never spill onto grass
@@ -958,6 +1027,11 @@ function frame(now){
   if (E.sunK > 0.01 && !interacting){ if (OPT){ if (KNOB.moverShadows) drawSunShadows(vis.filter(isMover), E, ctx, true); } else drawSunShadows(vis, E); }
   PERF.ph.shadows += performance.now() - tp; }
 
+  // the bird's shadow: a soft blob on the slab, smaller and fainter the higher it flies
+  if (FLY.on){ const [bx, by] = proj(FLY.x, FLY.y), k = 1 - 0.5 * FLY.alt / FLY_ALT;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = `rgba(40,40,60,${0.22 * k})`;
+    ctx.beginPath(); ctx.ellipse(bx, by - lift0, 2.6 * S * k, 2.6 * S * q * k, 0, 0, 7); ctx.fill(); }
+
   // ---- stacks, back to front ----
   const tStacks = performance.now();
   for (const v of vis){
@@ -1009,6 +1083,10 @@ function frame(now){
     fireflyPos.push([fx, fy, fh, blink]);
     ctx.fillStyle = `rgba(255,226,120,${blink * (.25 + .75 * E.night)})`; ctx.beginPath(); ctx.arc(sx, sy - lift0 - fh * S * .92, 0.7 * S, 0, 7); ctx.fill();
   }
+  // the bird flies above everything, so it draws after every stack (no sorting needed)
+  if (FLY.on){ const [bx, by] = proj(FLY.x, FLY.y), bob = Math.sin(FLY.t * 2.1) * 0.6;
+    drawStack(bird(birdFrame(FLY.t)), bx, by, FLY.hd, lift0 + (FLY.alt + bob) * S * 0.92); }
+
   // ---- light: scene tint, lamp & window light pools, lamp shadows, additive glows ----
   drawLighting(vis, E, t);
 
@@ -1080,10 +1158,10 @@ function node(id){
 function screenToWorld(x, y){
   const lift0 = GH * S * 0.92;
   const dx = (x - W / 2) / S, dy = (y - (H * 0.54 - lift0)) / (S * q), c = Math.cos(rot), s2 = Math.sin(rot);
-  return [dx * c + dy * s2, -dx * s2 + dy * c];
+  return [dx * c + dy * s2 + camX, -dx * s2 + dy * c + camY];
 }
 function walkTo(x, y, onArrive){ GIRL.tx = x; GIRL.ty = y; GIRL.walking = true; GIRL.onArrive = onArrive || null; marker = { x, y, t: 0.8 }; }
-window.__test = { perf: () => PERF.stats, opt: (on) => { if (OPT !== on) $('optBtn').click(); }, drag: (v) => { rotIn += v; rotV = 0; }, setTod: (v) => { tod = v; }, walkTo: (x, y) => walkTo(x, y), pond: () => pondC, lamp: () => [LAMP.x, LAMP.y], tufts: () => objs.filter(o => o.grass).length };
+window.__test = { perf: () => PERF.stats, opt: (on) => { if (OPT !== on) $('optBtn').click(); }, drag: (v) => { rotIn += v; rotV = 0; }, setTod: (v) => { tod = v; }, walkTo: (x, y) => walkTo(x, y), pond: () => pondC, lamp: () => [LAMP.x, LAMP.y], fly: (on) => setFly(on), steer: (v) => { FLY.steer = v; }, flight: () => ({ on: FLY.on, x: FLY.x, y: FLY.y, hd: FLY.hd, alt: FLY.alt, r: Math.hypot(FLY.x, FLY.y), camX, camY, rot }), tufts: () => objs.filter(o => o.grass).length };
 // ============ benchmark (?bench): runs every scenario, then POSTs the results to /bench ============
 async function runBench(){
   const ov = document.createElement('div');
@@ -1109,6 +1187,8 @@ async function runBench(){
     ['opt day windy', { wind: 2.4 }],
     ['opt day dragging', { drag: 0.02 }],
     ['opt night dragging', { tod: 0.85, drag: 0.02 }],
+    ['opt day flying (chase camera)', { fly: true }],
+    ['opt night flying (chase camera)', { tod: 0.85, fly: true }],
     ['orig day idle', { opt: false }],
     ['orig night idle', { opt: false, tod: 0.85 }],
     ['orig day dragging', { opt: false, drag: 0.02 }],
@@ -1128,6 +1208,8 @@ async function runBench(){
     if (BENCH.dpr !== dpr){ BENCH.dpr = dpr; resize(); }
     tod = cfg.tod; windK = cfg.wind; BENCH.drag = cfg.drag; lightKey = '';
     GIRL.walking = false; clearInterval(walker);
+    setFly(false); camX = 0; camY = 0; zoom = 1; S = S0;
+    if (cfg.fly) setFly(true);
     if (cfg.nearLamp){ GIRL.x = LAMP.x + 6; GIRL.y = LAMP.y + 2; }
     if (cfg.walk){ let j = 0; const go = () => { const o = tufts[(j++ * 7) % tufts.length]; walkTo(o.x, o.y); }; go(); walker = setInterval(go, 1200); }
     await visible();
@@ -1150,7 +1232,7 @@ async function runBench(){
       cpu_avg: +avg(cpus).toFixed(2), cpu_p95: +P(cpus, .95).toFixed(2), draws: Math.round(avg(rec.map(r => r.draws))),
       dpr, canvas: [W, H], ph });
   }
-  clearInterval(walker); BENCH.drag = 0; GIRL.walking = false;
+  clearInterval(walker); BENCH.drag = 0; GIRL.walking = false; setFly(false);
   let sent = false;
   try { const r = await fetch('bench', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) }); sent = r.ok; } catch (e) {}
   const lines = out.scenarios.map(s => `${s.name}: ${s.fps} fps, p95 ${s.gap_p95} ms, cpu ${s.cpu_avg} ms, ${s.draws} draws`);
