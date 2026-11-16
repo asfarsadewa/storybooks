@@ -82,6 +82,15 @@ test/                     checker tests and headless screenshot tests
 
 `start` is the first Ink knot. `player` is the cast member that the child walks with.
 
+A book on the desk (the start screen) also has these fields:
+
+```json
+"cover": { "motif": "kai", "colour": "#23416b", "lines": ["The Adventure of", "Kai the Brave"], "label": "Book one" },
+"playlist": ["heartsong", "meadow", "ship", "valda"]
+```
+
+`cover.motif` names a cover painting in `engine/desk-art.js`. `cover.lines` is the title on the cover and on the first page. The last line is the large one. `playlist` is the order in which the record player plays the book's music. A book without `cover` does not lie on the desk.
+
 ### 5.2 `story.ink` and the tag vocabulary
 
 All words in the book live in Ink. A line with no `by` tag is narration. Tags cue the staging. The vocabulary is fixed. The checker rejects any other tag. To add a tag, change the engine and this spec in the same change.
@@ -242,6 +251,7 @@ Kid rules for puzzles:
 | `cache` | — | **New:** bakes in IndexedDB, keyed by `hash(generatorVersion, params, seed)` |
 | `save` | — | **New:** autosave of the Ink state, the scene and positions |
 | `perf` | 05: HUD, `?bench` | None |
+| `desk` | — | **New:** the start screen. Gouache SVG layers baked to canvases, CSS motion (findings §7c) |
 
 The performance rules in §7 of the findings apply to every module.
 
@@ -313,6 +323,7 @@ The checker prints each measure as a percentage of the reference. After the tabl
 ## 9. Previewer
 
 - The previewer opens with `?scene=<id>`, `?knot=<name>` or `?cast=<id>`.
+- With no address, or with `?desk`, the previewer opens the desk. `?desk&dev` shows the HUD. `?desk&bench` runs the desk bench.
 - `?cast=<id>` shows the puppet with the rig overlay, every expression and the voice.
 - The previewer reloads when a document changes.
 - The previewer shows the frame-time HUD. It keeps `?bench` from prototype 05.

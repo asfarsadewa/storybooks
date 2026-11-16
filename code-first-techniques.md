@@ -448,6 +448,32 @@ After a drag, caches refill in about 1.5 s, with one 0.5 s window averaging 65 m
 - **Pitfall:** `background: transparent !important` on a panel also removes the generated background image. Set `background-color` only.
 - **The stage needs no sheet.** Without the card, the puppets stand on the diorama like a pop-up theatre. The author kept that look.
 
+## 7c. Gouache from SVG: the desk (the start screen)
+
+The start screen is a wooden desk seen from above. Book one lies in the middle. A record player, a mug, pencils, a brush and a leaf sprig sit at the edges. The author asked for gouache (flat matte colour, mustard and deep blue, leafy greens) and for empty space around the book (a sketchbook photo as the composition reference).
+
+**Technique.** Each layer is an SVG string from a pure generator (`engine/desk-art.js`). One SVG filter makes the paint (`engine/gouache.js`, `gouacheFilter`):
+
+1. A low-frequency `feDisplacementMap` wobbles every edge.
+2. Mid-frequency turbulence lightens and darkens the pigment in soft patches.
+3. A fine turbulence adds paper grain.
+4. An eroded-alpha rim darkens the silhouette edge. Gouache pools there as it dries.
+
+Translucent brush strokes inside large shapes give the paint a direction. Each layer is baked once to a canvas at the screen size, with the pixel ratio capped at 2. Motion is CSS `transform` and `opacity` on the baked canvases: the record spins, the arm swings, the book flies to the centre and the cover turns 180° in 3D. No JavaScript runs per frame.
+
+**Edge cases.**
+
+- An SVG drawn as an image cannot use the page's fonts. The book title is page text over the baked cover.
+- The desk planks continue past the 1000 × 1600 drawing on every side, so any screen shape fills. Landscape tablets show more empty desk.
+- The open book is baked at its open size and scaled down on the desk. Text and paint stay sharp when it grows.
+- A screen-size change (a tablet turns) bakes every layer again. The music keeps playing.
+- Strong mottling looks like carpet on wood and like rust on the mustard sun. Wood uses mottle 0.16 at a patch frequency of 0.025.
+- Removing a CSS spin animation snaps the record back to 0°. The record pauses with `animation-play-state` instead.
+- Music needs a tap (browser audio rules). The first tap on the record player starts it.
+- The bench needs no tap. It times the spin, the notes and the book open and close.
+
+**Numbers.** The headless Chromium bake takes 9–16 ms at pixel ratio 1 for 13 layers. Headless frame timing has no vsync, so its fps are for comparison only. The iPhone bench (`?desk&bench`) has not run yet.
+
 ## 8. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
