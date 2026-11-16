@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Babble — synthesized dialogue voices</title>
+<style>
+  :root{--paper:#f7f1e5;--ink:#3b2a2a;--teal:#2b9a8c;--coral:#e5664a;--mustard:#e8b04a}
+  html,body{margin:0;min-height:100%;background:#efe7d8;font-family:ui-rounded,"Nunito","Trebuchet MS",system-ui,sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none}
+  .wrap{max-width:620px;margin:0 auto;padding:12px 12px 24px;display:flex;flex-direction:column;gap:12px}
+  .seg{display:flex;background:#fffaf0;border-radius:999px;padding:4px;box-shadow:0 2px 0 #d8c9ad}
+  .seg button{flex:1;border:0;background:none;border-radius:999px;padding:9px 6px;font:inherit;font-weight:800;font-size:14px;color:var(--ink)}
+  .seg button.on{background:var(--teal);color:#fff}
+  .stage{position:relative;background:var(--paper);border-radius:18px;box-shadow:0 6px 20px rgba(60,40,30,.12);padding:14px 10px 10px;overflow:hidden}
+  .cast{display:flex;justify-content:space-around;align-items:flex-end}
+  .actor{display:flex;flex-direction:column;align-items:center;gap:4px;opacity:.55;transition:opacity .25s, transform .25s}
+  .actor.speaking{opacity:1;transform:translateY(-6px)}
+  .actor svg{width:min(26vw,140px);height:auto;overflow:visible}
+  .actor .nm{font-weight:800;font-size:13px}
+  .box{position:relative;background:#fff;border-radius:16px;margin-top:10px;padding:12px 14px 30px;min-height:96px;box-shadow:0 2px 0 #eadcc2;font-size:19px;line-height:1.35;cursor:pointer}
+  .box .who{font-weight:800;font-size:13px;letter-spacing:.05em;color:var(--coral);margin-bottom:3px}
+  .box .more{position:absolute;right:14px;bottom:8px;font-size:13px;font-weight:800;color:var(--teal);opacity:0;transition:opacity .2s}
+  .box .more.show{opacity:1;animation:bob 1s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-3px)}}
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.3;mix-blend-mode:multiply}
+  .panel{background:#fffaf0;border-radius:16px;padding:12px 14px;box-shadow:0 2px 0 #d8c9ad;display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;font-size:13px;font-weight:700}
+  .panel input[type=range]{width:100%;accent-color:var(--teal)}
+  .say{display:flex;gap:8px}
+  .say input{flex:1;border:2px solid #e2d3b6;border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;background:#fff;color:var(--ink)}
+  .say button,.go{border:0;border-radius:12px;padding:10px 14px;font:inherit;font-weight:800;background:var(--mustard);color:var(--ink);box-shadow:0 3px 0 #c58f2c}
+  .go{background:var(--teal);color:#fff;box-shadow:0 3px 0 #1f7d72}
+  .note{font-size:12px;opacity:.65;text-align:center;line-height:1.4}
+  #start{position:fixed;inset:0;background:rgba(239,231,216,.94);display:flex;align-items:center;justify-content:center;z-index:9}
+  #start button{border:0;border-radius:20px;padding:18px 26px;font:inherit;font-size:20px;font-weight:800;background:var(--teal);color:#fff;box-shadow:0 4px 0 #1f7d72}
+</style>
+</head>
+<body>
+<div id="start"><button id="startBtn">Tap to hear them talk</button></div>
+<div class="wrap">
+  <div class="seg" id="styles">
+    <button data-style="blip">Blip</button>
+    <button data-style="chatter">Chatter</button>
+    <button data-style="babble" class="on">Babble</button>
+  </div>
+
+  <div class="stage">
+    <svg class="grain" width="100%" height="100%"><filter id="g"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="3" seed="4"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#g)" opacity=".45"/></svg>
+    <svg width="0" height="0" style="position:absolute">
+      <filter id="rough" x="-10%" y="-10%" width="120%" height="120%"><feTurbulence type="fractalNoise" baseFrequency=".04" numOctaves="2" seed="3" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3.5" xChannelSelector="R" yChannelSelector="G"/></filter>
+      <filter id="fuzz" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="turbulence" baseFrequency=".2" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/></filter>
+      <filter id="soft"><feGaussianBlur stdDeviation="4"/></filter>
+    </svg>
+    <div class="cast">
+      <!-- Mira -->
+      <div class="actor" data-id="mira"><svg viewBox="0 0 120 130">
+        <g filter="url(#rough)">
+          <circle cx="60" cy="72" r="40" fill="#2f2226"/><circle cx="28" cy="88" r="16" fill="#2f2226"/><circle cx="92" cy="88" r="16" fill="#2f2226"/>
+          <ellipse cx="60" cy="76" rx="32" ry="34" fill="#f7cfb0"/>
+          <path d="M24 60 C22 30 42 18 60 18 C78 18 98 30 96 60 Z" fill="#e8b04a"/><path d="M22 56 Q60 46 98 56 L99 66 Q60 56 21 66 Z" fill="#d4952f"/>
+        </g>
+        <circle cx="60" cy="16" r="9" fill="#f3e6cf" filter="url(#fuzz)"/>
+        <ellipse cx="44" cy="88" rx="9" ry="6" fill="#ef7f6a" opacity=".5" filter="url(#soft)"/><ellipse cx="76" cy="88" rx="9" ry="6" fill="#ef7f6a" opacity=".5" filter="url(#soft)"/>
+        <g class="eyes" filter="url(#rough)"><ellipse cx="48" cy="78" rx="4" ry="5" fill="#2f2226"/><ellipse cx="72" cy="78" rx="4" ry="5" fill="#2f2226"/></g>
+        <path d="M58 84 Q60 89 62 84" stroke="#e8806a" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <g class="mouth" style="transform-origin:60px 96px"><ellipse cx="60" cy="96" rx="6" ry="4" fill="#7a3a34"/></g>
+      </svg><div class="nm">Mira</div></div>
+      <!-- Pip -->
+      <div class="actor" data-id="pip"><svg viewBox="0 0 120 130">
+        <g filter="url(#rough)" id="pipSpines"></g>
+        <g filter="url(#rough)"><ellipse cx="66" cy="84" rx="30" ry="26" fill="#f1dcc0"/></g>
+        <circle cx="94" cy="80" r="6" fill="#2f2226"/>
+        <ellipse cx="70" cy="94" rx="8" ry="5" fill="#ef7f6a" opacity=".5" filter="url(#soft)"/>
+        <g class="eyes"><ellipse cx="72" cy="72" rx="4" ry="5" fill="#2f2226"/><circle cx="73.5" cy="70" r="1.4" fill="#fff"/></g>
+        <g class="mouth" style="transform-origin:84px 96px"><ellipse cx="84" cy="96" rx="4.5" ry="3" fill="#7a3a34"/></g>
+      </svg><div class="nm">Pip</div></div>
+      <!-- Hoot -->
+      <div class="actor" data-id="hoot"><svg viewBox="0 0 120 130">
+        <g filter="url(#rough)">
+          <path d="M26 40 L34 18 L46 34 Z M94 40 L86 18 L74 34 Z" fill="#7a5236"/>
+          <ellipse cx="60" cy="74" rx="38" ry="44" fill="#9a6a45"/><ellipse cx="60" cy="88" rx="24" ry="26" fill="#e9cfa8"/>
+          <circle cx="44" cy="62" r="15" fill="#f3e6cf"/><circle cx="76" cy="62" r="15" fill="#f3e6cf"/>
+          <path d="M32 54 Q44 46 56 54 M64 54 Q76 46 88 54" stroke="#5c3d2e" stroke-width="3" fill="none"/>
+        </g>
+        <g class="eyes"><circle cx="44" cy="63" r="6.5" fill="#2f2226"/><circle cx="76" cy="63" r="6.5" fill="#2f2226"/><circle cx="46" cy="61" r="2" fill="#fff"/><circle cx="78" cy="61" r="2" fill="#fff"/></g>
+        <circle cx="60" cy="40" r="1" fill="none"/>
+        <g class="mouth" style="transform-origin:60px 80px"><path d="M53 74 L67 74 L60 86 Z" fill="#e8b04a" stroke="#c3852a" stroke-width="1.5"/></g>
+      </svg><div class="nm">Hoot</div></div>
+    </div>
+    <div class="box" id="box"><div class="who" id="who">PIP</div><div id="text"></div><div class="more" id="more">tap ▸</div></div>
+  </div>
+
+  <div class="say"><input id="mine" placeholder="Type a line for the speaker…" maxlength="140"><button id="sayBtn">Say</button></div>
+
+  <div class="panel">
+    <span>Speaker</span>
+    <div class="seg" id="who2" style="box-shadow:none;background:#f3ead9"><button data-sp="mira">Mira</button><button data-sp="pip" class="on">Pip</button><button data-sp="hoot">Hoot</button></div><span></span>
+    <span>Pitch</span><input id="pitch" type="range" min="-12" max="12" value="0" step="1"><span id="pitchV">0 st</span>
+    <span>Speed</span><input id="speed" type="range" min="50" max="200" value="100" step="5"><span id="speedV">100%</span>
+    <span>Volume</span><input id="vol" type="range" min="0" max="100" value="70"><span id="volV">70%</span>
+  </div>
+  <button class="go" id="replay">Replay the scene</button>
+  <p class="note">All of this audio is synthesized live in Web Audio, with no recordings. On iPhone, Web Audio stays silent when the ringer switch is on silent.</p>
+</div>
+
+<script>
+'use strict';
+// ================= voices =================
+// f0: speaking pitch (Hz). fs: formant scale (small creature = bigger). rate: seconds per letter.
+// wave: source timbre. vib: vibrato depth (semitones) and rate. breath: noise mixed into vowels.
+const VOICES = {
+  mira: { name: 'Mira', f0: 290, fs: 1.18, rate: 0.058, vib: [0.25, 6], breath: 0.05, jitter: 0.06, blipWave: 'square', blip: 620 },
+  pip:  { name: 'Pip',  f0: 520, fs: 1.55, rate: 0.042, vib: [0.4, 9],  breath: 0.03, jitter: 0.12, blipWave: 'triangle', blip: 1100 },
+  hoot: { name: 'Hoot', f0: 125, fs: 0.84, rate: 0.082, vib: [0.6, 4.5], breath: 0.16, jitter: 0.04, blipWave: 'sawtooth', blip: 260, gain: 1.35 },
+};
+// vowel formants (Hz) for an adult voice; scaled per speaker by fs
+const VOWELS = { a: [800, 1250, 2600], e: [500, 1900, 2600], i: [320, 2300, 3000], o: [520, 880, 2500], u: [340, 760, 2400], y: [320, 2100, 2800], ə: [500, 1400, 2500] };
+// consonant families by letter
+const CONS = {};
+for (const c of 'ptkbdgcq') CONS[c] = 'plosive';
+for (const c of 'sz') CONS[c] = 's';
+for (const c of 'fvhx') CONS[c] = 'f';
+for (const c of 'mnlrwj') CONS[c] = 'sonorant';
+
+// deterministic jitter: the same line always sounds the same (generator + params + seed)
+function hash(a, b){ let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35); h ^= h >>> 15; h = Math.imul(h, 0x27d4eb2d); return ((h ^ (h >>> 13)) >>> 0) / 4294967296; }
+function strHash(s){ let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
+
+// ================= audio graph =================
+let AC, master, comp, analyser, noiseBuf, buzz;
+function initAudio(){
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  comp = AC.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 4;
+  master = AC.createGain(); master.gain.value = 0.7;
+  analyser = AC.createAnalyser(); analyser.fftSize = 512;
+  master.connect(comp); comp.connect(analyser); analyser.connect(AC.destination);
+  // white noise for consonants and breath
+  noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // a glottal-ish buzz: all harmonics, falling ~12 dB/octave (like vocal folds)
+  const N = 40, re = new Float32Array(N + 1), im = new Float32Array(N + 1);
+  for (let n = 1; n <= N; n++) im[n] = 1 / (n * Math.sqrt(n));
+  buzz = AC.createPeriodicWave(re, im);
+}
+
+// one line = its own bus, so it can be cut off cleanly when skipped
+function newBus(){ const g = AC.createGain(); g.connect(master); return g; }
+
+// envelope helper: quick attack, hold, smooth release (no clicks)
+function env(g, t, peak, dur, att = 0.008, rel = 0.03){
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + att);
+  g.gain.setValueAtTime(Math.max(0.0002, peak), t + Math.max(att, dur - rel));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+}
+
+// --- Blip: one short tone per letter (Undertale style) ---
+function blip(bus, t, v, pitchMul, amp){
+  const o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter();
+  o.type = v.blipWave; o.frequency.value = v.blip * pitchMul;
+  lp.type = 'lowpass'; lp.frequency.value = 3200;
+  o.connect(lp); lp.connect(g); g.connect(bus);
+  env(g, t, 0.16 * amp, 0.045, 0.003, 0.02);
+  o.start(t); o.stop(t + 0.06);
+}
+
+// --- Chatter: fast ticks that jump around in pitch (Golden Sun-ish) ---
+function chatter(bus, t, v, pitchMul, amp, r){
+  const o = AC.createOscillator(), g = AC.createGain(), bp = AC.createBiquadFilter();
+  o.type = 'square';
+  const f = v.blip * pitchMul * (0.8 + r * 0.5);
+  o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * (0.75 + r * 0.2), t + 0.035);
+  bp.type = 'bandpass'; bp.frequency.value = Math.min(5000, f * 2); bp.Q.value = 1.2;
+  o.connect(bp); bp.connect(g); g.connect(bus);
+  env(g, t, 0.32 * amp, 0.038, 0.002, 0.02);
+  o.start(t); o.stop(t + 0.05);
+  // a tiny noise click on top gives it that "typewriter-voice" grit
+  const n = AC.createBufferSource(), ng = AC.createGain(), hp = AC.createBiquadFilter();
+  n.buffer = noiseBuf; hp.type = 'highpass'; hp.frequency.value = 3000;
+  n.connect(hp); hp.connect(ng); ng.connect(bus); env(ng, t, 0.05 * amp, 0.012, 0.001, 0.008);
+  n.start(t, Math.random() * 0.5, 0.02);
+}
+
+// --- Babble: a buzz through vowel formant filters, with consonant onsets ---
+function vowel(bus, t, dur, v, f0a, f0b, vw, amp){
+  const F = VOWELS[vw] || VOWELS['ə'];
+  const src = AC.createOscillator(); src.setPeriodicWave(buzz);
+  src.frequency.setValueAtTime(f0a, t); src.frequency.linearRampToValueAtTime(f0b, t + dur);
+  // vibrato
+  const lfo = AC.createOscillator(), lg = AC.createGain();
+  lfo.frequency.value = v.vib[1]; lg.gain.value = f0a * (Math.pow(2, v.vib[0] / 12) - 1);
+  lfo.connect(lg); lg.connect(src.frequency);
+  const out = AC.createGain(); out.connect(bus);
+  // three parallel resonances = the vowel colour
+  [[F[0], 1.0, 7], [F[1], 0.55, 11], [F[2], 0.22, 14]].forEach(([f, gain, q]) => {
+    const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * v.fs; bp.Q.value = q;
+    const g = AC.createGain(); g.gain.value = gain * 3.2;
+    src.connect(bp); bp.connect(g); g.connect(out);
+  });
+  // breath: noise shaped by the second formant
+  if (v.breath > 0){
+    const n = AC.createBufferSource(), bp = AC.createBiquadFilter(), g = AC.createGain();
+    n.buffer = noiseBuf; bp.type = 'bandpass'; bp.frequency.value = F[1] * v.fs; bp.Q.value = 3; g.gain.value = v.breath * 4;
+    n.connect(bp); bp.connect(g); g.connect(out); n.start(t, Math.random() * 0.5, dur + 0.05);
+  }
+  env(out, t, 0.14 * amp, dur, 0.012, Math.min(0.04, dur * 0.5));
+  src.start(t); lfo.start(t); src.stop(t + dur + 0.02); lfo.stop(t + dur + 0.02);
+}
+function consonant(bus, t, kind, v, amp){
+  if (kind === 'sonorant') return 0;            // m, n, l, r, w: carried by the vowel (just a softer onset)
+  const n = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  n.buffer = noiseBuf; n.connect(f); f.connect(g); g.connect(bus);
+  let dur;
+  if (kind === 'plosive'){ f.type = 'bandpass'; f.frequency.value = 1800 * v.fs; f.Q.value = 0.9; dur = 0.014; env(g, t, 0.22 * amp, dur, 0.001, 0.01); }
+  else if (kind === 's'){ f.type = 'highpass'; f.frequency.value = 4800; dur = 0.045; env(g, t, 0.06 * amp, dur, 0.008, 0.02); }
+  else { f.type = 'bandpass'; f.frequency.value = 2400 * v.fs; f.Q.value = 0.7; dur = 0.035; env(g, t, 0.07 * amp, dur, 0.006, 0.02); }
+  n.start(t, Math.random() * 0.5, dur + 0.02);
+  return dur * 0.7;
+}
+
+// ================= planning a line: timing + intonation =================
+// Returns events { t (s from start), i (char index), sound info }. The text reveal follows the same clock.
+function plan(text, v, style, pitchSemis, speedMul){
+  const seed = strHash(text), lower = text.toLowerCase(), ev = [];
+  const rate = v.rate / speedMul, base = Math.pow(2, pitchSemis / 12);
+  let t = 0.05;
+  // find sentences for intonation (declination; rise for questions; lift for exclamations)
+  const sentences = []; let st = 0;
+  for (let i = 0; i < text.length; i++) if (/[.!?…]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1]))){ sentences.push([st, i]); st = i + 1; }
+  if (st < text.length) sentences.push([st, text.length - 1]);
+  const sentenceOf = i => sentences.find(([a, b]) => i >= a && i <= b) || [0, text.length - 1];
+  let wordStart = true, n = 0;
+  for (let i = 0; i < text.length; i++){
+    const ch = lower[i], [a, b] = sentenceOf(i), endCh = text[b], p = (i - a) / Math.max(1, b - a);
+    const q = endCh === '?', ex = endCh === '!';
+    // pitch contour across the sentence
+    let contour = 1.08 - 0.16 * p;
+    if (q && p > 0.7) contour += (p - 0.7) * 1.1;
+    if (ex) contour *= 1.12;
+    const r = hash(seed, i);
+    const stress = wordStart ? 1.07 : 1;
+    const pm = base * contour * stress * (1 + (r - 0.5) * 2 * v.jitter);
+    const amp = (wordStart ? 1.2 : 1) * (ex ? 1.15 : 1);
+    if (/[a-z]/.test(ch)){
+      let dur = rate * (ex ? 0.88 : 1) * (0.85 + r * 0.3);
+      if ('aeiouy'.includes(ch)) dur *= 1.15;
+      // the vowel for this letter's syllable: itself if a vowel, else the next vowel in the word
+      let vw = 'aeiouy'.includes(ch) ? ch : null;
+      if (!vw){ for (let j = i + 1; j < text.length && /[a-z]/.test(lower[j]); j++) if ('aeiouy'.includes(lower[j])){ vw = lower[j]; break; } }
+      if (!vw) vw = 'ə';
+      const sounding = style === 'chatter' ? n % 2 === 0 : true;
+      ev.push({ t, i, dur, ch, vw, pm, amp, r, sound: sounding, cons: CONS[ch] });
+      t += dur; n++; wordStart = false;
+    } else {
+      // spaces and punctuation are rests; digits and others type silently
+      let rest = rate * 0.55;
+      if (ch === ',' || ch === ';' || ch === ':') rest = rate * 4;
+      else if (/[.!?]/.test(ch)) rest = rate * 7;
+      else if (ch === '…') rest = rate * 10;
+      ev.push({ t, i, dur: rest, sound: false });
+      t += rest; wordStart = /\s/.test(ch) || /[.!?,;:…-]/.test(ch) || wordStart;
+    }
+  }
+  return { ev, total: t };
+}
+
+function schedule(bus, t0, events, v, style){
+  for (const e of events){
+    if (!e.sound) continue;
+    const t = t0 + e.t;
+    if (v.gain && !e._g){ e.amp *= v.gain; e._g = 1; }
+    if (style === 'blip'){ blip(bus, t, v, e.pm, e.amp); continue; }
+    if (style === 'chatter'){ chatter(bus, t, v, e.pm, e.amp, e.r); continue; }
+    // babble: consonant onset, then the vowel nucleus gliding slightly in pitch
+    const lead = e.cons ? consonant(bus, t, e.cons, v, e.amp) : 0;
+    const f0 = v.f0 * e.pm;
+    vowel(bus, t + lead, Math.max(0.03, e.dur - lead + 0.012), v, f0, f0 * (0.96 + e.r * 0.06), e.vw, e.amp * (e.cons === 'sonorant' ? 0.85 : 1));
+  }
+}
+
+// ================= dialogue + UI =================
+const SCENE = [
+  ['pip', "Oh! Hello there. I didn't hear you coming!"],
+  ['mira', 'Hi Pip! Why do you look so worried?'],
+  ['pip', "The lantern by the bridge went out... and the fireflies can't find their way home!"],
+  ['hoot', 'Hoo-hoo. Long ago, only the brave could light it. Are you brave, little one?'],
+  ['mira', "I think so? I'll bring my bravest smile!"],
+  ['pip', "Hooray! Let's go, let's go, let's go!"],
+];
+let style = 'babble', speaker = 'pip', lineIdx = -1, current = null;
+const $ = id => document.getElementById(id);
+const tune = { mira: { pitch: 0, speed: 100 }, pip: { pitch: 0, speed: 100 }, hoot: { pitch: 0, speed: 100 } };
+
+function speak(who, text, onDone){
+  stopLine();
+  const v = VOICES[who], tn = tune[who];
+  const { ev, total } = plan(text, v, style, tn.pitch, tn.speed / 100);
+  const bus = newBus(), t0 = AC.currentTime + 0.06;
+  schedule(bus, t0, ev, v, style);
+  document.querySelectorAll('.actor').forEach(a => a.classList.toggle('speaking', a.dataset.id === who));
+  $('who').textContent = v.name.toUpperCase(); $('text').textContent = ''; $('more').classList.remove('show');
+  current = { who, text, ev, t0, total, bus, onDone, done: false };
+}
+function stopLine(){
+  if (!current) return;
+  const b = current.bus, t = AC.currentTime;
+  b.gain.cancelScheduledValues(t); b.gain.setValueAtTime(b.gain.value, t); b.gain.linearRampToValueAtTime(0, t + 0.04);
+  setTimeout(() => b.disconnect(), 120);
+  current = null;
+}
+function finishLine(){
+  if (!current || current.done) return;
+  current.done = true; $('text').textContent = current.text; $('more').classList.add('show');
+  const cb = current.onDone; if (cb) cb();
+}
+function nextLine(){
+  lineIdx++;
+  if (lineIdx >= SCENE.length){ lineIdx = -1; $('who').textContent = ''; $('text').textContent = '(the end, tap Replay)'; document.querySelectorAll('.actor').forEach(a => a.classList.remove('speaking')); return; }
+  const [who, text] = SCENE[lineIdx];
+  speak(who, text);
+}
+$('box').onclick = () => {
+  if (!AC) return;
+  if (current && !current.done){ const c = current; stopLine(); current = c; finishLine(); return; }   // tap while typing: show the whole line
+  if (current && current.custom){ current = null; return; }
+  nextLine();
+};
+$('replay').onclick = () => { lineIdx = -1; nextLine(); };
+$('sayBtn').onclick = () => { const t = $('mine').value.trim() || 'Ahoy! Is anybody out there?'; speak(speaker, t); current.custom = true; };
+$('mine').addEventListener('keydown', e => { if (e.key === 'Enter') $('sayBtn').click(); });
+document.querySelectorAll('#styles button').forEach(b => b.onclick = () => {
+  style = b.dataset.style; document.querySelectorAll('#styles button').forEach(o => o.classList.toggle('on', o === b));
+  if (current){ const { who, text, custom } = current; speak(who, text); current.custom = custom; }
+});
+function syncTune(){ $('pitch').value = tune[speaker].pitch; $('speed').value = tune[speaker].speed; $('pitchV').textContent = (tune[speaker].pitch > 0 ? '+' : '') + tune[speaker].pitch + ' st'; $('speedV').textContent = tune[speaker].speed + '%'; }
+document.querySelectorAll('#who2 button').forEach(b => b.onclick = () => { speaker = b.dataset.sp; document.querySelectorAll('#who2 button').forEach(o => o.classList.toggle('on', o === b)); syncTune(); });
+$('pitch').oninput = e => { tune[speaker].pitch = +e.target.value; syncTune(); };
+$('speed').oninput = e => { tune[speaker].speed = +e.target.value; syncTune(); };
+$('vol').oninput = e => { $('volV').textContent = e.target.value + '%'; if (master) master.gain.value = e.target.value / 100; };
+document.querySelectorAll('.actor').forEach(a => a.onclick = () => { if (!AC) return; const sp = a.dataset.id; speak(sp, { mira: 'La la la!', pip: 'Eep! Hee hee!', hoot: 'Hoo. Hoo-hoo.' }[sp]); current.custom = true; });
+
+// Pip's spines (the same little generator as the drawings)
+{ const g = $('pipSpines'); let s = 31; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const ring = (cx, cy, rx, ry, n, len, col) => { let d = ''; for (let i = 0; i <= n; i++){ const a = Math.PI * .7 + (i / n) * Math.PI * 1.5, am = a + Math.PI / n, r2 = 1 + len * (.8 + rnd() * .4);
+    d += (i ? 'L' : 'M') + (cx + Math.cos(a) * rx).toFixed(1) + ' ' + (cy + Math.sin(a) * ry).toFixed(1) + 'L' + (cx + Math.cos(am) * rx * r2).toFixed(1) + ' ' + (cy + Math.sin(am) * ry * r2).toFixed(1); }
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d + 'Z'); p.setAttribute('fill', col); g.appendChild(p); };
+  ring(54, 84, 42, 34, 22, .32, '#7a5236'); ring(54, 86, 34, 27, 18, .28, '#9a6a45'); }
+
+// ================= the text and the mouths follow the audio clock =================
+const td = new Float32Array(512);
+let mouthOpen = 0;
+function frame(){
+  if (AC && current && !current.done){
+    const now = AC.currentTime - current.t0;
+    let shown = 0; for (const e of current.ev){ if (e.t <= now) shown = e.i + 1; else break; }
+    $('text').textContent = current.text.slice(0, shown);
+    if (now >= current.total) finishLine();
+  }
+  // mouth = loudness of what is actually playing (RMS from the analyser)
+  let rms = 0;
+  if (analyser){ analyser.getFloatTimeDomainData(td); for (let i = 0; i < td.length; i++) rms += td[i] * td[i]; rms = Math.sqrt(rms / td.length); }
+  mouthOpen += (Math.min(1, rms * 9) - mouthOpen) * 0.5;
+  document.querySelectorAll('.actor').forEach(a => {
+    const m = a.querySelector('.mouth'), on = current && a.dataset.id === current.who;
+    m.style.transform = `scale(${on ? 1 + mouthOpen * 0.4 : 0.9}, ${on ? 0.35 + mouthOpen * 1.9 : 0.35})`;
+  });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+// blinking
+setInterval(() => document.querySelectorAll('.eyes').forEach(e => { e.style.transform = 'scaleY(0.1)'; e.style.transformBox = 'fill-box'; e.style.transformOrigin = 'center'; setTimeout(() => e.style.transform = '', 120); }), 3300);
+
+$('startBtn').onclick = () => { initAudio(); AC.resume(); $('start').style.display = 'none'; lineIdx = -1; nextLine(); };
+window.__test = { plan: (t, who = 'pip', st = 'babble') => plan(t, VOICES[who], st, 0, 1), state: () => current && { who: current.who, done: current.done, shown: $('text').textContent } };
+</script>
+</body>
+</html>
