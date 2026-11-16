@@ -6,7 +6,7 @@ This repo is research for a code-first narrative storybook game for children. It
 - `prototypes/` holds the working demos. Each is one self-contained HTML file with no build step. Treat them as reference implementations: copy the techniques, not the file structure.
 - `prototypes/05-painted-diorama.html` is the most complete. It exposes `window.__test` (`walkTo(x, y)`, `setTod(0..1)`, `tufts()`, `pond()`) for headless browser tests.
 - `prototypes/06-baked-svg-puppet.html` is the stage-mode puppet reference. It exposes `window.__test` (`parts()`, `tap(x, y)` in drawing units).
-- `prototypes/07-gait-walker.html` is the procedural gait reference. It exposes `window.__test` (`state()`, `gait(name)`, `stop()`, `go(±1)`). Planted feet must drift 0 units; check that after any change.
+- `prototypes/07-gait-walker.html` is the procedural gait reference. It exposes `window.__test` (`state()`, `gait(name)`, `stop()`, `go(±1)`, `speed(v)`, `pipBtn()`, `pip()`). Planted feet (hers and Pip's) must drift 0 units; check that after any change.
 - No asset files. Everything visual or audible is generated from `(generator, params, seed)` and baked once.
 - Before a change in technique, discuss it first and list its edge cases.
 - Add new findings to `code-first-techniques.md`, in the matching section, with measured numbers where you have them.

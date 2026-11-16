@@ -202,11 +202,29 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 
 **Footfall chart:** the last 3 s of stance per foot plus an airborne row (a Hildebrand-style gait diagram), recorded every frame from the real foot state, not from the pattern. So it shows transitions honestly.
 
-**Next steps:**
-- A drawn edge-on frame for the flip (a thin card edge).
-- An uneven ground height function in the IK target.
-- Gait from a speed slider (automatic walk → run transition at a Froude-number threshold).
-- The hedgehog walking on its own with a 4-beat quadruped pattern.
+**Speed slider → automatic gait (Froude number):**
+- `Fr = v² / (g · legLength)`. With a child's 164-unit leg ≈ 0.6 m, `g ≈ 2680 units/s²`.
+- **Hysteresis:** run above Fr 0.42, back to walk below 0.32, so the gait never flickers at the boundary.
+- In auto mode, cadence scales with `√(v / v₀)` and stride = `v / cadence`.
+- Measured: walk at 120, 200 and 300 u/s (Fr 0.03–0.20), run at 520 u/s (Fr 0.62). **0.000** planted-foot drift at every speed.
+- Speed below 12 stops her (settle → idle). A tap restarts at 160 u/s.
+
+**Card edge on turning:** while `|scaleX| < 0.35`, draw a paper strip (corrugated edge) the height of the puppet at the hip, fading in as she goes edge-on.
+
+**Pip, the quadruped:** it hops out of the backpack (parabola with a spin), follows 95 units behind her, and hops back in on request. Same machinery as hers (stance windows, edge-triggered timed swings, plants aimed at mid-stance), with four legs:
+
+| Gait | Footfall offsets (nh, nf, fh, ff) | Duty | Used when |
+|---|---|---|---|
+| walk (lateral sequence) | 0, .25, .5, .75 | 72% | speed < 90 |
+| trot (diagonal pairs) | nf + fh at 0, ff + nh at .5 | 42% | < 240 |
+| gallop | fronts 0 / .08, hinds .48 / .56 | 26% | above |
+
+- Legs are drawn as short curved strokes from the shoulder or hip attachment to the planted paw. At this size they need no IK.
+- Standing still: any paw more than 6 units from home shuffles back.
+- Measured: **0.000** paw drift in trot and gallop.
+- Pip's four feet join the footfall chart, so you can see the diagonal pairing of the trot directly.
+
+**Next steps:** an uneven ground height in both IK targets; Pip walking (not trotting) at slow speeds (raise its thresholds or shorten its stride); sounds per footfall from the musikmodel synth (the chart already knows every contact).
 
 ## 6. Decisions so far
 

@@ -13,7 +13,7 @@
   .bar button.on{background:#2b9a8c;color:#fff;box-shadow:0 2px 0 #1f7d72}
   .bar button.stop{background:#e5664a;color:#fff;box-shadow:0 2px 0 #b9472f}
   #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;opacity:.7}
-  #err{position:fixed;left:10px;right:10px;top:96px;background:#fff3f0;color:#a33;border-radius:10px;padding:8px 10px;font-size:12px;display:none;z-index:20}
+  #err{position:fixed;left:10px;right:10px;top:100px;background:#fff3f0;color:#a33;border-radius:10px;padding:8px 10px;font-size:12px;display:none;z-index:20}
 </style>
 </head>
 <body>
@@ -21,6 +21,12 @@
 <div class="bar">
   <button data-gait="walk" class="on">Walk</button><button data-gait="run">Run</button><button data-gait="skip">Skip</button><button data-gait="sneak">Sneak</button>
   <button id="stop" class="stop">Stop</button><button id="rig">Rig</button>
+</div>
+<div class="bar" style="top:52px">
+  <label style="display:flex;align-items:center;gap:6px;background:#fffaf0;border-radius:999px;padding:5px 12px;box-shadow:0 2px 0 #d8c9ad;font-size:13px;font-weight:700">
+    Speed <input id="speed" type="range" min="0" max="620" value="160" style="width:min(36vw,170px);accent-color:#2b9a8c"><span id="spd" style="width:64px">auto</span>
+  </label>
+  <button id="pipBtn">Pip: hop out</button>
 </div>
 <div id="loading">Painting the puppet…</div>
 <div id="err"></div>
@@ -147,6 +153,15 @@ addEventListener('unhandledrejection', e => { const el = document.getElementById
   </g></g>
   <g data-part="pom"><g transform="translate(300 470)"><circle cx="14" cy="-366" r="26" fill="#f3e6cf" filter="url(#fuzz)"/><circle cx="8" cy="-372" r="12" fill="#fffaf0" opacity=".5" filter="url(#fuzz)"/></g></g>
 
+  <!-- Pip out of the backpack: body only (legs are drawn by the gait code) -->
+  <g data-part="pip"><g transform="translate(300 470)">
+    <g id="pipSpines" filter="url(#dry)"></g>
+    <g filter="url(#paint)"><ellipse cx="4" cy="6" rx="26" ry="12" fill="#e9cfa8"/><ellipse cx="24" cy="0" rx="15" ry="12" fill="#f1dcc0"/></g>
+    <circle cx="39" cy="1" r="4.5" fill="#2f2226" filter="url(#rough)"/>
+    <ellipse cx="25" cy="-5" rx="3.2" ry="4" fill="#2f2226" filter="url(#rough)"/><circle cx="26" cy="-6.5" r="1.2" fill="#fffaf0"/>
+    <ellipse cx="24" cy="6" rx="5" ry="3.5" fill="#ef7f6a" opacity=".5" filter="url(#blush)"/>
+  </g></g>
+
   <!-- near arm on top -->
   <g data-part="armUN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-13" y="-118" width="26" height="68" rx="12" fill="url(#knit)"/></g></g>
   <g data-part="armLN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-11" y="-60" width="22" height="58" rx="10" fill="url(#knit)"/><rect x="-12" y="-12" width="24" height="9" rx="3" fill="#e8b04a"/><circle cx="2" cy="7" r="11" fill="#f2c4a2"/></g></g>
@@ -178,6 +193,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
       d += (i ? 'L' : 'M') + (cx + Math.cos(a) * rx).toFixed(1) + ' ' + (cy + Math.sin(a) * ry).toFixed(1) + 'L' + (cx + Math.cos(am) * rx * r2).toFixed(1) + ' ' + (cy + Math.sin(am) * ry * r2).toFixed(1); }
     el('path', { d: d + 'Z', fill: col }, sp); };
   ring(-76, -122, 26, 20, 16, .38, '#7a5236'); ring(-76, -120, 21, 16, 13, .34, '#9a6a45'); ring(-76, -118, 14, 11, 10, .3, '#b48055');
+  // Pip's own spines for walking around (a wider dome over its back)
+  const ps = document.getElementById('pipSpines');
+  const ring2 = (cx, cy, rx, ry, n, len, col) => { let d = '';
+    for (let i = 0; i <= n; i++){ const a = Math.PI * 0.92 + (i / n) * Math.PI * 1.05, am = a + Math.PI / n, r2 = 1 + len * (.8 + rnd() * .4);
+      d += (i ? 'L' : 'M') + (cx + Math.cos(a) * rx).toFixed(1) + ' ' + (cy + Math.sin(a) * ry).toFixed(1) + 'L' + (cx + Math.cos(am) * rx * r2).toFixed(1) + ' ' + (cy + Math.sin(am) * ry * r2).toFixed(1); }
+    el('path', { d: d + 'Z', fill: col }, ps); };
+  s = 44; ring2(-4, 4, 30, 22, 18, .36, '#7a5236'); ring2(-4, 5, 24, 17, 15, .32, '#9a6a45'); ring2(-4, 6, 16, 11, 11, .28, '#b48055');
 }
 
 // ---------------- bake each part through its filters, once ----------------
@@ -264,6 +286,19 @@ function flights(g){
 }
 for (const k in GAITS) GAITS[k].flights = flights(GAITS[k]);
 
+// Froude number Fr = v^2 / (g * legLength). People switch walk -> run near Fr 0.5.
+// World units: leg 164 units ~ 0.6 m for a child, so g ~ 2680 units/s^2.
+const G_UNITS = 2680, LEG = 164;
+const froude = v => v * v / (G_UNITS * LEG);
+const RUN_AT = 0.42, WALK_AT = 0.32;          // hysteresis: run above 0.42, back to walk below 0.32
+let auto = false, targetSpeed = 160;
+// the gait actually used: in auto mode cadence and stride scale with speed (cadence ~ sqrt(speed))
+function effective(name){
+  const g = GAITS[name];
+  if (!auto || (name !== 'walk' && name !== 'run')) return g;
+  const v0 = g.L * g.f, v = Math.max(20, targetSpeed), f = g.f * Math.sqrt(v / v0);
+  return { ...g, f, L: v / f };
+}
 // state
 const P = { gait: 'walk', next: 'walk', ph: 0, hipX: 0, v: 0, dir: 1, flip: 1, flipT: 0,
   state: 'moving',             // moving | settling | turning | idle
@@ -283,9 +318,17 @@ function startSwing(foot, toX, dur, h){
 function neutral(which){ return P.hipX + P.dir * (which === 'near' ? 9 : -9); }
 
 function stepGait(dt){
-  const g = GAITS[P.gait];
+  if (auto){
+    const fr = froude(targetSpeed);
+    if (P.next === 'walk' && fr > RUN_AT) setNext('run');
+    else if (P.next === 'run' && fr < WALK_AT) setNext('walk');
+    if (targetSpeed < 12 && P.wantMove){ P.wantMove = false; if (P.state === 'moving') P.state = 'settling'; }
+    else if (targetSpeed >= 12 && !P.wantMove){ P.wantMove = true; }
+  }
+  const g = effective(P.gait);
   // blend numeric params toward the gait we're in (pattern windows switch at the cycle boundary)
   for (const k in num) num[k] = lerp(num[k], g[k], Math.min(1, dt * 5));
+  document.getElementById('spd').textContent = auto ? Math.round(targetSpeed) + ' u/s' : 'manual';
   const speed = num.L * num.f;
   if (P.state === 'moving'){
     P.v = lerp(P.v, speed, Math.min(1, dt * 4));
@@ -346,6 +389,7 @@ function stepGait(dt){
     }
   }
 }
+function setNext(name){ P.next = name; if (P.state !== 'moving') P.gait = name; document.querySelectorAll('[data-gait]').forEach(o => o.classList.toggle('on', o.dataset.gait === name)); }
 function resetPhase(){ P.ph = 0; P.gait = P.next; feet.near.prevStance = true; feet.far.prevStance = !!inWindows(GAITS[P.gait].far, 0); }
 
 // hip height: standing height for the gait, a pendulum rise over each stance (walk),
@@ -374,6 +418,91 @@ function ik(tx, ty){
   return { thigh: -(base + A), shin: Math.PI - B, fwd: base + A };  // knee in front, shin folds back
 }
 
+// ================= Pip: quadruped gaits =================
+// Legs: nf/ff = near/far front, nh/fh = near/far hind. Attach points relative to the body centre (facing +x).
+const PIP_LEGS = { nf: [15, 7], ff: [11, 6], nh: [-17, 8], fh: [-21, 7] };
+const PIP_BODY = 26;                       // body centre height above the ground
+const QGAITS = {
+  // lateral-sequence walk: hind then front on the same side, always 3 feet down
+  walk:   { L: 30, duty: .72, offs: { nh: 0, nf: .25, fh: .5, ff: .75 }, bob: 1, stepH: 7 },
+  // trot: diagonal pairs land together
+  trot:   { L: 52, duty: .42, offs: { nf: 0, fh: 0, ff: .5, nh: .5 }, bob: 2.5, stepH: 10 },
+  // gallop: fronts then hinds, with a flight between
+  gallop: { L: 90, duty: .26, offs: { nf: 0, ff: .08, nh: .48, fh: .56 }, bob: 6, stepH: 13 },
+};
+const PIP = { mode: 'ride', x: 0, y: 0, vx: 0, dir: 1, ph: 0, gait: 'walk', next: 'walk', hop: null, feet: {} };
+for (const k in PIP_LEGS) PIP.feet[k] = { x: 0, planted: true, sw: null, prevStance: true, lift: 0, hist: [] };
+const qStance = (g, k, ph) => ((ph - g.offs[k]) % 1 + 1) % 1 < g.duty;
+function pipLandAt(x){ PIP.x = x; for (const k in PIP_LEGS){ const f = PIP.feet[k]; f.x = x + PIP.dir * PIP_LEGS[k][0]; f.planted = true; f.sw = null; f.lift = 0; } }
+function packWorld(){ return [P.hipX - P.dir * 74, P.hipY - 118]; }
+function pipStep(dt){
+  if (PIP.mode === 'ride') return;
+  if (PIP.hop){                                         // hopping out of / into the backpack: a parabola
+    const h = PIP.hop; h.t += dt; const u = Math.min(1, h.t / h.dur);
+    PIP.x = lerp(h.x0, h.x1, u); PIP.y = lerp(h.y0, h.y1, u) - Math.sin(Math.PI * u) * h.peak; PIP.spin = Math.sin(Math.PI * u) * 0.5 * h.spinDir;
+    if (u >= 1){ PIP.hop = null; PIP.spin = 0;
+      if (PIP.mode === 'hopIn'){ PIP.mode = 'ride'; SP.pack.v += 6; SP.hh.v += 30; return; }
+      PIP.mode = 'follow'; PIP.y = -PIP_BODY; pipLandAt(PIP.x); }
+    return;
+  }
+  // follow her (or, when returning, run to the backpack and hop in)
+  const target = PIP.mode === 'return' ? packWorld()[0] : P.hipX - P.dir * 95;
+  const err = target - PIP.x, want = clamp(err * 3.2, -460, 460);
+  PIP.vx = lerp(PIP.vx, Math.abs(err) < 6 && PIP.mode !== 'return' ? 0 : want, Math.min(1, dt * 4));
+  const sp = Math.abs(PIP.vx);
+  if (sp > 12) PIP.dir = Math.sign(PIP.vx); else if (PIP.mode === 'follow') PIP.dir = Math.sign(P.hipX - PIP.x) || 1;
+  if (PIP.mode === 'return' && Math.abs(err) < 28){
+    const [px, py] = packWorld(); PIP.mode = 'hopIn';
+    PIP.hop = { t: 0, dur: 0.5, x0: PIP.x, y0: PIP.y, x1: px, y1: py + 10, peak: 70, spinDir: -1 }; return;
+  }
+  PIP.next = sp < 90 ? 'walk' : sp < 240 ? 'trot' : 'gallop';
+  const G = QGAITS[PIP.gait];
+  if (sp > 12){
+    PIP.ph += sp / G.L * dt;
+    if (PIP.ph >= 1){ PIP.ph -= 1; PIP.gait = PIP.next; }
+  }
+  PIP.x += PIP.vx * dt;
+  const Gq = QGAITS[PIP.gait], cad = Math.max(0.3, sp / Gq.L);
+  for (const k in PIP_LEGS){
+    const f = PIP.feet[k], st = sp > 12 ? qStance(Gq, k, PIP.ph) : true;
+    if (f.prevStance && !st && f.planted){
+      const toStart = ((Gq.offs[k] - PIP.ph) % 1 + 1) % 1, tMid = (toStart + Gq.duty / 2) / cad;
+      f.sw = { from: f.x, to: PIP.x + PIP.vx * tMid + PIP.dir * PIP_LEGS[k][0], t: 0, dur: Math.max(0.05, toStart / cad), h: Gq.stepH };
+      f.planted = false;
+    }
+    f.prevStance = st;
+    if (f.sw){ const w = f.sw; w.t += dt; const u = Math.min(1, w.t / w.dur), e = u * u * (3 - 2 * u);
+      f.x = lerp(w.from, w.to, e); f.lift = Math.sin(Math.PI * u) * w.h;
+      if (u >= 1){ f.sw = null; f.planted = true; f.lift = 0; } }
+    else if (sp <= 12){
+      // standing: shuffle any foot that ended up far from under its shoulder or hip
+      const home = PIP.x + PIP.dir * PIP_LEGS[k][0];
+      if (Math.abs(f.x - home) > 6) { f.sw = { from: f.x, to: home, t: 0, dur: 0.14, h: 5 }; f.planted = false; }
+    }
+  }
+  PIP.y = -PIP_BODY - (sp > 12 ? Math.abs(Math.sin(PIP.ph * Math.PI * 2)) * Gq.bob : 0);
+  PIP.tilt = PIP.gait === 'gallop' && sp > 12 ? Math.sin(PIP.ph * Math.PI * 2) * 0.12 : 0;
+}
+function drawPip(){
+  if (PIP.mode === 'ride') return;
+  const sx = toScreenX(PIP.x), sy = GROUND + PIP.y * K;
+  const leg = (k, col) => {
+    const f = PIP.feet[k], [ax, ay] = PIP_LEGS[k];
+    if (PIP.hop) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const x0 = sx + PIP.dir * ax * K, y0 = sy + ay * K, x1 = toScreenX(f.x), y1 = GROUND - f.lift * K;
+    ctx.strokeStyle = col; ctx.lineWidth = 5.5 * K; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo((x0 + x1) / 2 + PIP.dir * 2 * K, (y0 + y1) / 2, x1, y1); ctx.stroke();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x1 + PIP.dir * 2 * K, y1, 4.5 * K, 2.5 * K, 0, 0, 7); ctx.fill();
+  };
+  // shadow
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(80,60,40,.18)';
+  ctx.beginPath(); ctx.ellipse(sx, GROUND + 3 * K, 30 * K * (PIP.hop ? 0.6 : 1), 5 * K, 0, 0, 7); ctx.fill();
+  leg('ff', '#5c3d2e'); leg('fh', '#5c3d2e');
+  ctx.setTransform(K * PIP.dir, 0, 0, K, sx, sy); ctx.rotate((PIP.spin || 0) + (PIP.tilt || 0)); draw('pip');
+  leg('nf', '#7a5236'); leg('nh', '#7a5236');
+}
+
 // ---------------- springs for follow-through ----------------
 const spring = (k, c) => ({ x: 0, v: 0, step(dt, drive){ this.v += (-k * this.x - c * this.v + drive) * dt; this.x += this.v * dt; } });
 const SP = { pom: spring(70, 6), ear: spring(55, 4), scarf: spring(30, 5), pack: spring(120, 9), hh: spring(90, 6), skirt: spring(80, 9), head: spring(60, 10) };
@@ -381,11 +510,25 @@ let prevHipY = HIP_REST, prevVy = 0, prevV = 0;
 
 // ---------------- input ----------------
 let showRig = false, giggle = 0, blinkT = 0;
+const airHist = [];
 document.querySelectorAll('[data-gait]').forEach(b => b.onclick = () => {
+  auto = false; document.getElementById('spd').textContent = 'manual';
   P.next = b.dataset.gait; if (P.state !== 'moving') P.gait = P.next;
   P.wantMove = true; if (P.state === 'idle'){ P.state = 'moving'; resetPhase(); }
   document.querySelectorAll('[data-gait]').forEach(o => o.classList.toggle('on', o === b));
 });
+document.getElementById('speed').oninput = e => {
+  auto = true; targetSpeed = +e.target.value;
+  if (P.next !== 'walk' && P.next !== 'run') setNext(froude(targetSpeed) > RUN_AT ? 'run' : 'walk');
+  if (targetSpeed >= 12 && P.state === 'idle'){ P.wantMove = true; P.state = 'moving'; resetPhase(); }
+};
+document.getElementById('pipBtn').onclick = e => {
+  if (PIP.mode === 'ride'){
+    const [px, py] = packWorld(); PIP.mode = 'hopOut'; PIP.dir = P.dir;
+    PIP.hop = { t: 0, dur: 0.6, x0: px, y0: py + 10, x1: P.hipX - P.dir * 120, y1: -PIP_BODY, peak: 80, spinDir: 1 };
+    e.target.textContent = 'Pip: back in';
+  } else if (PIP.mode === 'follow'){ PIP.mode = 'return'; e.target.textContent = 'Pip: hop out'; }
+};
 document.getElementById('stop').onclick = () => { P.wantMove = false; if (P.state === 'moving') P.state = 'settling'; };
 document.getElementById('rig').onclick = e => { showRig = !showRig; e.target.classList.toggle('on', showRig); };
 let camX = 0;
@@ -394,6 +537,7 @@ cv.addEventListener('pointerdown', e => {
   const x = e.clientX * DPR, y = e.clientY * DPR, hx = toScreenX(P.hipX), hy = GROUND + P.hipY * K;
   if (Math.abs(x - hx) < 110 * K && y > hy - 420 * K && y < GROUND + 10 * K){ giggle = 1.4; SP.head.v += 3; return; }   // tap her: giggle
   const d = x < hx ? -1 : 1;                                       // tap left/right of her: walk that way
+  if (auto && targetSpeed < 12){ targetSpeed = 160; document.getElementById('speed').value = 160; }
   P.wantDir = d; P.wantMove = true;
   if (d !== P.dir){ if (P.state === 'moving') P.state = 'settling'; else if (P.state === 'idle'){ P.state = 'turning'; P.flipT = 0; } }
   else if (P.state === 'idle'){ P.state = 'moving'; resetPhase(); }
@@ -427,6 +571,7 @@ function frame(now){
   if (cv.width !== Math.floor(innerWidth * Math.min(2, devicePixelRatio || 1)) || cv.height !== Math.floor(innerHeight * Math.min(2, devicePixelRatio || 1))) layout();
   const dt = Math.min(0.04, Math.max(0, (now - last) / 1000)); last = now; T += dt;
   stepGait(dt);
+  pipStep(dt);
   const hipYt = hipHeight();
   P.hipY = lerp(P.hipY, hipYt, Math.min(1, dt * 18));
   const vy = (P.hipY - prevHipY) / Math.max(dt, 1e-3), ay = (vy - prevVy) / Math.max(dt, 1e-3); prevHipY = P.hipY; prevVy = vy;
@@ -462,6 +607,7 @@ function frame(now){
   // soft shadow under her
   ctx.fillStyle = 'rgba(80,60,40,.18)'; ctx.beginPath(); ctx.ellipse(toScreenX(P.hipX), GROUND + 6 * K, 70 * K * (1 + (P.hipY - HIP_REST) / 300), 9 * K, 0, 0, 7); ctx.fill();
 
+  drawPip();
   // ---- the puppet ----
   const hx = toScreenX(P.hipX), hy = GROUND + P.hipY * K;
   ctx.setTransform(K * P.flip * P.dir, 0, 0, K, hx, hy);
@@ -500,7 +646,7 @@ function frame(now){
   const headXf = () => about(0, -140, () => ctx.rotate(headRot));
   ctx.save(); headXf(); draw('hair'); ctx.restore();
   ctx.save(); about(-62, -114, () => ctx.rotate(SP.pack.x * 0.02)); ctx.translate(0, SP.pack.x * 0.6);
-  ctx.save(); about(-70, -112, () => ctx.rotate(SP.hh.x * 0.03 - P.v * 0.0006)); ctx.translate(0, SP.hh.x * 0.5); draw('hh'); ctx.restore();
+  ctx.save(); about(-70, -112, () => ctx.rotate(SP.hh.x * 0.03 - P.v * 0.0006)); ctx.translate(0, SP.hh.x * 0.5); if (PIP.mode === 'ride') draw('hh'); ctx.restore();
   draw('pack'); ctx.restore();
   ctx.save(); about(-34, -138, () => ctx.rotate(clamp(P.v * 0.0016 + SP.scarf.x * 0.05, -0.3, 1.1))); draw('scarfTail'); ctx.restore();
   ctx.restore();
@@ -525,6 +671,15 @@ function frame(now){
   drawArm('near', 'armUN', 'armLN');
   ctx.restore();   // torso
 
+  // ---- the card's edge while she is turned edge-on (she is a paper puppet) ----
+  if (P.state === 'turning' && P.flip < 0.35){
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const a = 1 - P.flip / 0.35, top = hy - 400 * K, bot = GROUND + 2 * K, w = 7 * K;
+    ctx.globalAlpha = a; ctx.fillStyle = '#e6d6b3'; ctx.fillRect(hx - w / 2, top, w, bot - top);
+    ctx.strokeStyle = '#b89c6a'; ctx.lineWidth = 1.2 * DPR; ctx.strokeRect(hx - w / 2, top, w, bot - top);
+    ctx.beginPath(); for (let y = top + 6 * K; y < bot; y += 9 * K){ ctx.moveTo(hx - w / 2, y); ctx.quadraticCurveTo(hx, y + 4 * K, hx + w / 2, y); } ctx.stroke();   // corrugation
+    ctx.restore();
+  }
   // ---- rig overlay: bones, IK targets, planted feet ----
   if (showRig){
     ctx.lineWidth = 3; ctx.font = 'bold 16px system-ui';
@@ -538,30 +693,33 @@ function frame(now){
     ctx.fillStyle = '#2b9a8c'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, 7); ctx.fill();
   }
 
-  // ---- footfall chart: last 3 s, stance = filled bar ----
+  // ---- footfall chart: last 3 s, stance = filled bar (recorded from the real feet, not the pattern) ----
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const hist = feet.near.hist; feet.near.hist.push([T, feet.near.planted]); feet.far.hist.push([T, feet.far.planted]);
-  for (const f of [feet.near, feet.far]) while (f.hist.length && T - f.hist[0][0] > 3) f.hist.shift();
-  const px = W * 0.06, pw = W * 0.88, py = GROUND + 40 * K, ph = Math.min(H - py - 12 * DPR, 120 * DPR);
-  if (ph > 50 * DPR){
-    ctx.fillStyle = 'rgba(255,250,240,.88)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, 14 * DPR) : ctx.rect(px, py, pw, ph); ctx.fill();
-    const G = GAITS[P.gait], fs = 12 * DPR, rowH = ph * 0.2, x0 = px + 70 * DPR, cw = pw - 84 * DPR;
-    ctx.fillStyle = '#3b2a2a'; ctx.font = `700 ${fs}px system-ui`;
+  const rec = (f, v) => { f.hist.push([T, v]); while (f.hist.length && T - f.hist[0][0] > 3) f.hist.shift(); };
+  rec(feet.near, feet.near.planted); rec(feet.far, feet.far.planted);
+  airHist.push([T, !feet.near.planted && !feet.far.planted]); while (airHist.length && T - airHist[0][0] > 3) airHist.shift();
+  const pipOut = PIP.mode === 'follow' || PIP.mode === 'return';
+  for (const k in PIP.feet) rec(PIP.feet[k], pipOut && PIP.feet[k].planted);
+  const rows = [['near foot', feet.near.hist, '#2b9a8c'], ['far foot', feet.far.hist, '#7fb8b0'], ['airborne', airHist, '#e8b04a']];
+  if (pipOut) for (const [k, lab] of [['nf', 'Pip near F'], ['ff', 'Pip far F'], ['nh', 'Pip near H'], ['fh', 'Pip far H']]) rows.push([lab, PIP.feet[k].hist, k.endsWith('f') ? '#b48055' : '#7a5236']);
+  const px = W * 0.05, pw = W * 0.9, py = GROUND + 40 * K;
+  const rowH = Math.min(18 * DPR, (H - py - 44 * DPR) / (rows.length + (pipOut ? 1.5 : 0)) - 4 * DPR), ph = 36 * DPR + rows.length * (rowH + 4 * DPR) + (pipOut ? 22 * DPR : 0);
+  if (rowH > 6 * DPR){
+    ctx.fillStyle = 'rgba(255,250,240,.9)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, 14 * DPR) : ctx.rect(px, py, pw, ph); ctx.fill();
+    const G = GAITS[P.gait], Ge = effective(P.gait), fs = 12 * DPR, x0 = px + 86 * DPR, cw = pw - 98 * DPR;
     const contacts = G.near.length + G.far.length;
-    ctx.fillText(`${P.state === 'moving' ? P.gait[0].toUpperCase() + P.gait.slice(1) : P.state === 'idle' ? 'Standing' : 'Stopping'} · duty ${Math.round(G.near.reduce((a, w) => a + w.len, 0) * 100)}% · ${Math.round(contacts * G.f * 60)} contacts/min · ${G.flights.length ? 'has flight' : 'always grounded'}`, px + 12 * DPR, py + 20 * DPR);
-    const rows = [['near', feet.near, '#2b9a8c'], ['far', feet.far, '#7fb8b0']];
-    rows.forEach(([lab, f, col], r) => {
-      const y = py + 32 * DPR + r * (rowH + 8 * DPR);
-      ctx.fillStyle = '#3b2a2a'; ctx.font = `600 ${fs * .9}px system-ui`; ctx.fillText(lab + ' foot', px + 12 * DPR, y + rowH * .7);
+    ctx.fillStyle = '#3b2a2a'; ctx.font = `700 ${fs}px system-ui`;
+    ctx.fillText(`${P.state === 'moving' ? P.gait[0].toUpperCase() + P.gait.slice(1) : P.state === 'idle' ? 'Standing' : P.state === 'turning' ? 'Turning' : 'Stopping'} · duty ${Math.round(G.near.reduce((a, w) => a + w.len, 0) * 100)}% · ${Math.round(contacts * Ge.f * 60)}/min · Fr ${froude(P.v).toFixed(2)}${auto ? ' (auto)' : ''}`, px + 12 * DPR, py + 20 * DPR);
+    let y = py + 30 * DPR;
+    rows.forEach(([lab, hist, col], r) => {
+      if (r === 3){ ctx.fillStyle = '#3b2a2a'; ctx.font = `700 ${fs}px system-ui`;
+        const sp = Math.abs(PIP.vx); ctx.fillText(`Pip · ${sp > 12 ? PIP.gait : 'standing'} · ${Math.round(QGAITS[PIP.gait].duty * 100)}% duty`, px + 12 * DPR, y + 15 * DPR); y += 22 * DPR; }
+      ctx.fillStyle = '#3b2a2a'; ctx.font = `600 ${fs * .85}px system-ui`; ctx.fillText(lab, px + 12 * DPR, y + rowH * .78);
       ctx.fillStyle = 'rgba(59,42,42,.08)'; ctx.fillRect(x0, y, cw, rowH);
       ctx.fillStyle = col;
-      for (let i = 1; i < f.hist.length; i++) if (f.hist[i][1]){ const xa = x0 + cw * (1 - (T - f.hist[i - 1][0]) / 3), xb = x0 + cw * (1 - (T - f.hist[i][0]) / 3); ctx.fillRect(xa, y, xb - xa + .6, rowH); }
+      for (let i = 1; i < hist.length; i++) if (hist[i][1]){ const xa = x0 + cw * (1 - (T - hist[i - 1][0]) / 3), xb = x0 + cw * (1 - (T - hist[i][0]) / 3); ctx.fillRect(xa, y, xb - xa + .6, rowH); }
+      y += rowH + 4 * DPR;
     });
-    // airborne row
-    const y = py + 32 * DPR + 2 * (rowH + 8 * DPR);
-    ctx.fillStyle = '#3b2a2a'; ctx.fillText('airborne', px + 12 * DPR, y + rowH * .7);
-    ctx.fillStyle = '#e8b04a';
-    for (let i = 1; i < feet.near.hist.length && i < feet.far.hist.length; i++) if (!feet.near.hist[i][1] && !feet.far.hist[i][1]){ const xa = x0 + cw * (1 - (T - feet.near.hist[i - 1][0]) / 3), xb = x0 + cw * (1 - (T - feet.near.hist[i][0]) / 3); ctx.fillRect(xa, y, xb - xa + .6, rowH); }
   }
 
   // paper grain
@@ -571,7 +729,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-window.__test = { state: () => ({ state: P.state, gait: P.gait, dir: P.dir, hipX: P.hipX, near: feet.near.x, far: feet.far.x, nearPlanted: feet.near.planted, farPlanted: feet.far.planted }),
+window.__test = { pip: () => ({ mode: PIP.mode, gait: PIP.gait, x: PIP.x, vx: PIP.vx, feet: Object.fromEntries(Object.entries(PIP.feet).map(([k, f]) => [k, [f.x, f.planted]])) }), speed: (v) => { const r = document.getElementById('speed'); r.value = v; r.oninput({ target: r }); }, pipBtn: () => document.getElementById('pipBtn').click(), state: () => ({ state: P.state, gait: P.gait, dir: P.dir, hipX: P.hipX, near: feet.near.x, far: feet.far.x, nearPlanted: feet.near.planted, farPlanted: feet.far.planted }),
   gait: (g) => document.querySelector(`[data-gait="${g}"]`).click(), stop: () => document.getElementById('stop').click(),
   go: (d) => cv.dispatchEvent(new PointerEvent('pointerdown', { clientX: d > 0 ? innerWidth - 5 : 5, clientY: innerHeight * 0.3 })) };
 })();
