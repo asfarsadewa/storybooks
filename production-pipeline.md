@@ -371,6 +371,8 @@ Both scenes pass the definition of done (§10) in every scenario the story uses.
 
 **A full play on the iPhone 14 Pro** (the author, 2026-11-16): music, voices, the stage card and the puppets over the diorama. No problems were found.
 
+**Book one is done** (2026-11-16). The author replayed it on the iPhone with the final font (Fredoka), the paper UI and the sound effects. No problems were found.
+
 **Finished after the play:** clearer puzzle instructions (numbered steps for each engine, tune labels, a pick count), the house outline on Kai, 10 synthesized sound effects for the `sfx` tags, and the storybook UI (findings §7b). A third full autoplay passed. Across the three autoplays, every trust value, every mask choice and every ending played.
 
 **Open:**
