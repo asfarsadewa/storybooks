@@ -337,3 +337,27 @@ Test M1 on the iPhone in its first week. Safari SVG baking is the biggest risk t
 2. The tag vocabulary will want to grow. Each new tag is an engine change. Keep the list short.
 3. After book one: a parametric character generator, so one spec makes the puppet, the map figure and the profile walker.
 4. After book one: read-aloud TTS (tiny-voca).
+
+## 13. Book one status
+
+*The Adventure of Kai the Brave* plays from start to end in `storybook-game` (`?book=kai`). Two headless autoplays finished the book on different branches (trust, mask choice, ending, two or three logs).
+
+| Step | Status |
+|---|---|
+| M0 to M1 | Done (§11) |
+| M2: one knot end to end | Done: hotspot, stage card, babble voices, choices, back to explore |
+| M3 to M4: puzzles and checks | Done: 4 engines, 10 puzzle documents, solver checks; 31 Node tests |
+| M5: the book | Done: 4 scenes, 6 cast entries (4 puppets), the full story, 4 music moods, autosave, the end card, an offline PWA |
+
+**Fields the build added** (the documents use them; the tests check them):
+- Scenes: `slab.ground` (`meadow`, `woods`, `valda`), `lights[].colour`, `lights[].reach`, `lights[].shadows` (false: no lamp shadows), and hotspot `when` / `unless` (a story variable) and `once`.
+- Time of day: `afternoon` joins `morning`, `midday`, `golden`, `night`.
+- Cast: `puppet.hide` (parts this entry never shows; Zarbor masked and unmasked share one drawing).
+- `book.json`: `firstScene`, and `sceneMusic` (the mood of each scene; a resumed game gets music).
+- The music module plays musikmodel documents (vendored at commit 80ef643). It ducks to 45% under dialogue and puzzles.
+
+**Open:**
+1. A batched iPhone bench of the new scenes (crash, Valda) and a full play on the phone.
+2. The kid has no outline (§4.8 of the findings). The golden-hour refill is at 6% slow frames. Book one stages no scene at golden hour, and its lamp light has no shadows.
+3. Sound effects (`sfx`) are valid tags with no sounds yet.
+4. A low-cost tablet.
