@@ -154,6 +154,60 @@ The **Fly** button turns the player into a small voxel bird. The chase camera fr
 
 Flight costs the same as dragging. A low-cost tablet is not measured yet.
 
+### 4.8 Style lab (improving the painted look)
+
+**Prototype:** `09-style-lab.html`, a copy of 05 with four bake-time levers. Each lever has a toggle. A model keeps its recipe, so a style change rebakes every model in place and clears every cache.
+
+| Lever | What it does | Cost |
+|---|---|---|
+| Brush | Strokes follow the form. Tops get one painter's direction. Walls get strokes around the form, with bristle lines. The direction comes from a normal estimated from the 3×3×3 occupancy. | Bake only |
+| Light | Warm on the sun side, cool violet in the shade. 4 painted atlases per model, one for each model-local sun direction. The draw picks one from the sun's azimuth minus the object's yaw. | Bake, and 4× painted atlas memory |
+| Outline | A warm-ink edge baked into each impostor. The stack is drawn once, a copy is tinted with `source-in`, the copy is stamped at 8 offsets (radius `0.14 S`, alpha 0.62), and the stack goes on top. Grass gets none. Live draws (drag, fly) get none. | Impostor build only |
+| Corners | Removes convex staircase corners: a voxel with exactly two open sides that touch. A voxel with three or four open sides is a thin feature (a pole, a blade), so it stays. A few top corners stay, so roofs keep a crisp ridge. Thin models (grass, posts) skip this lever. | Bake only |
+
+**Decision:** the author chose **outline + corners**. Brush and light stay in the lab.
+
+**Measured** (iPhone 14 Pro, Safari, pixel ratio 1.5, `?bench`):
+
+| Scenario | Plain: fps / slow frames | Outline + corners: fps / slow frames |
+|---|---|---|
+| Day idle | 60 / 0% | 60 / 0% |
+| Golden hour, night | — | 60 / 0% |
+| Windy | — | 58 / 2% |
+| Dragging | 60 / 0% (1,385 draws) | 60 / 0% (1,352 draws) |
+| Flying | — | 60 / 0% |
+| Refill after a drag | 53 / 3%, one 282 ms frame | 53 / 4%, one 295 ms frame |
+
+- Outline + corners costs nothing measurable. Corners remove voxels, so draws go down a little.
+- Rebaking the whole scene in a new style takes 1.0–1.4 s on the phone (66–190 ms headless).
+- At pixel ratio 1, brush and light are hard to see. The first brush strength (`0.8 + 0.3 b`) was invisible on a phone-size screen. `0.7 + 0.46 b + 0.12 ridge` shows.
+- **New finding, not caused by the style: one frame of about 0.3 s right after a drag ends, in both styles.** Earlier benches did not measure this moment.
+
+**The freeze after a drag: cause and fix** (3 more bench runs on the same iPhone, `?bench` reports the slowest frame of each scenario):
+
+| Refill after a drag | Worst frame | Slow frames | What the worst frame did |
+|---|---|---|---|
+| As in prototype 05 | 300 ms | 4% | 24 impostor builds + every static sun shadow (3,448 draws) |
+| No static shadows (diagnostic) | 84 ms | 4% | 24 impostor builds |
+| Progressive shadows | 164 ms | 3% | 24 builds + 500 shadow slices |
+| + a shared offscreen budget (300 slices) | 66 ms | 7% | 15–24 builds of small grass tufts |
+| **+ at most 6 builds per frame** | **52 ms** | **3%** | 1 build, live draws (first frame after the drag) |
+| The same at golden hour | 40 ms | 4% | |
+
+- **Two causes.** All the work fell in the first frame after the drag: the impostor refill (24 builds) and the full static shadow pass.
+- **On Safari, an impostor build has a fixed cost.** Small grass tufts fit the slice budget, but 15–24 of them still cost 60–100 ms. Limit the number of builds, not only the slices.
+- **Progressive static shadows:** draw the slices from the already-tinted dark atlas. An ellipse clip replaces `destination-in`, so there is no composite chain. Spread the slices over frames, and fade the finished buffer in over about 0.25 s.
+- **Order the work.** Impostors build first, at most 6 per frame and within a shared budget of 300 offscreen slices per frame. Objects still waiting draw live, which is cheap (dragging is 1,385 live draws at 60 fps). The static shadows continue only in frames where no impostor is waiting.
+- 12 builds per frame gave the same worst frame (49 ms) but more slow frames (9%). 6 is the setting.
+- Add this as performance rule 11 (§7): **one offscreen budget per frame, counted in builds and in slices.**
+
+**In the engine** (`storybook-game`: outline and corners on by default, rule 11, progressive static shadows; iPhone 14 Pro, 20 scenarios):
+- Idle, golden hour, night, windy, dragging and flying: 59.7–60 fps, 0–1% slow frames.
+- Refill after a drag: day 50 ms worst frame and 3% slow frames, golden hour 40 ms and **6%**.
+- The kid in the lamp pool: **9%** slow frames (4% before the house style). The mover lamp shadows and the outline builds now share frames.
+- The kid has no outline. The renderer draws the player live, and the outline is baked into impostors only. The player needs a live outline.
+- These three are the open items for the house style.
+
 ---
 
 ## 5. Baked SVG puppet rig (animating the gouache drawing)
@@ -187,7 +241,8 @@ The bake scale is about the display scale (`min(2.4, fit.k × 1.05)`), so bitmap
 
 **Pitfalls:**
 - Put `addEventListener('error')` in its own `<script>` before the main one. A syntax error in the main script stops that same script from registering its own error handler, and the page just sits on "loading".
-- Not yet tested on Safari. Rendering an SVG data URL with filters into `Image` should work there, but confirm it.
+- **Safari applies the filters** (tested in M1 of `storybook-game`, iPhone 14 Pro, iOS 18.7). Tako's 11 parts baked in 163 ms with no empty parts. A filter probe proves it on every device: a square swatch through the `paint` filter must come out with a ragged edge (the displacement map), and a swatch through a blur must come out with soft edges. Measured edge spread 0.76 px (0 without the filter) and 87% soft pixels in the edge band. A first probe that measured the mottling failed even in Chromium, because the noise barely changes across a small swatch. Measure the displacement instead.
+- The rig plays at 60 fps with 0% slow frames on the same phone (0.25 ms CPU per frame, pixel ratio 2).
 
 **Opinion:** this is the stage-mode puppet technique. It's the `twilight-bugle` rig (pivots, attach points, hierarchy) with parts generated from code instead of painted by an image model.
 
@@ -312,6 +367,7 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 8. **No allocation in the hot loop.** Reuse the `vis` objects and sort in place, compact arrays in place instead of `filter()`, and cache gradients by key.
 9. **No idle auto-rotation.** A camera that never stops means nothing can be cached. Rotate on input only.
 10. **Measure.** Every prototype shows a frame-time HUD: fps, CPU ms (average and p95), draws per frame, pixel ratio, impostor count, layer rebuilds per second. Test on the cheapest real phone or tablet available.
+11. **One offscreen budget per frame.** All drawing into offscreen canvases (impostor builds, shadow buffers) shares one budget: at most 6 impostor builds and 300 slices per frame. Work over the budget waits for a later frame. Order it: impostors first, static shadows only when no impostor waits. Measure the frame right after an interaction ends (§4.8).
 
 **Measured** (headless Chromium, **no GPU**, 390×760 at 3× device scale; CPU = JS time per frame; fps capped at 60):
 
@@ -379,6 +435,44 @@ After a drag, caches refill in about 1.5 s, with one 0.5 s window averaging 65 m
 **Bench mode:** open `05-painted-diorama.html?bench` from `tools/bench-server.py`. The page runs every scenario by itself (1.5 s warm-up and 4 s of measurement each). Then it POSTs the results to the PC. The server saves them in `bench-results/` (git ignores this folder). Turn off Low Power Mode on iPhones first, because it caps Safari at 30 fps.
 
 **Still slow, and the next lever: WebGL for explore mode.** Dragging is the one case caching can't fix in Canvas 2D: every stack must be redrawn at a new angle. Sprite stacking is the ideal GPU workload: all slices of all models in one texture atlas, every slice an **instanced quad in a single draw call**, the bend and squash in the vertex shader, and shadows as a second instanced pass with a projection matrix. That should make dragging as cheap as idle. Keep Canvas 2D or SVG for the puppet stage and UI.
+
+## 7b. Storybook UI from code (bubbles, captions, cards)
+
+**Built in:** `storybook-game/engine/paper.js`. The author said the first speech bubbles looked like generic web controls.
+
+- **Inked outlines in code.** Walk a rounded rectangle in steps of about 10 px. Nudge each point by smooth seeded noise (three sines with seeded phases), then join the points with quadratic curves through their midpoints. The edge looks hand-inked, and the same seed always draws the same edge. A second faint stroke, offset by about 1 px, gives a doubled-ink look.
+- **No image files.** The shape is an SVG string in a `data:` URL, set as the element's background at its exact pixel size. A `ResizeObserver` redraws it when the size changes, so the edge stays crisp. A paper grain is an `feTurbulence` filter inside that SVG, clipped to the shape (Safari applies filters in SVG images, §5).
+- **Speech tails.** The tail's root sits just inside the body edge. Its fill hides the body's ink there, and only its two sides are inked, so no line crosses the root. The tail points at the speaker: left or right of a two-puppet stage, or straight up.
+- **Narration** is a parchment caption with no tail and italic type. **Choices** are inked tags in light tints of the palette.
+- **Type:** the first version used the system's book serif (Iowan Old Style on iPhone). The author found it too "corporate web app". A sampler of seven iOS system fonts (rounded, Chalkboard, Marker Felt, Noteworthy and others) also failed: none looks like a game. **Decision: Fredoka** (SIL OFL 1.1), the one font file in the game. Latin weights 400 (narration), 500 (dialogue) and 600 (names, buttons) are about 16 KB each as WOFF2. Fredoka has no italic, so narration uses a lighter weight and a softer colour. A faked slant looks cheap.
+- **Pitfall:** `background: transparent !important` on a panel also removes the generated background image. Set `background-color` only.
+- **The stage needs no sheet.** Without the card, the puppets stand on the diorama like a pop-up theatre. The author kept that look.
+
+## 7c. Gouache from SVG: the desk (the start screen)
+
+The start screen is a wooden desk seen from above. Book one lies in the middle. A record player, a mug, pencils, a brush and a leaf sprig sit at the edges. The author asked for gouache (flat matte colour, mustard and deep blue, leafy greens) and for empty space around the book (a sketchbook photo as the composition reference).
+
+**Technique.** Each layer is an SVG string from a pure generator (`engine/desk-art.js`). One SVG filter makes the paint (`engine/gouache.js`, `gouacheFilter`):
+
+1. A low-frequency `feDisplacementMap` wobbles every edge.
+2. Mid-frequency turbulence lightens and darkens the pigment in soft patches.
+3. A fine turbulence adds paper grain.
+4. An eroded-alpha rim darkens the silhouette edge. Gouache pools there as it dries.
+
+Translucent brush strokes inside large shapes give the paint a direction. Each layer is baked once to a canvas at the screen size, with the pixel ratio capped at 2. Motion is CSS `transform` and `opacity` on the baked canvases: the record spins, the arm swings, the book flies to the centre and the cover turns 180° in 3D. No JavaScript runs per frame.
+
+**Edge cases.**
+
+- An SVG drawn as an image cannot use the page's fonts. The book title is page text over the baked cover.
+- The desk planks continue past the 1000 × 1600 drawing on every side, so any screen shape fills. Landscape tablets show more empty desk.
+- The open book is baked at its open size and scaled down on the desk. Text and paint stay sharp when it grows.
+- A screen-size change (a tablet turns) bakes every layer again. The music keeps playing.
+- Strong mottling looks like carpet on wood and like rust on the mustard sun. Wood uses mottle 0.16 at a patch frequency of 0.025.
+- Removing a CSS spin animation snaps the record back to 0°. The record pauses with `animation-play-state` instead.
+- Music needs a tap (browser audio rules). The first tap on the record player starts it.
+- The bench needs no tap. It times the spin, the notes and the book open and close.
+
+**Numbers.** The headless Chromium bake takes 9–16 ms at pixel ratio 1 for 13 layers. Headless frame timing has no vsync, so its fps are for comparison only. The iPhone bench (`?desk&bench`) has not run yet.
 
 ## 8. Decisions so far
 

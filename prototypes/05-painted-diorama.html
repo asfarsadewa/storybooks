@@ -1172,7 +1172,7 @@ async function runBench(){
   const baseDpr = o => o ? Math.min(1.5, devicePixelRatio || 1) : Math.min(2, devicePixelRatio || 1);
   const tufts = objs.filter(o => o.grass);
   let walker = 0, retry = 0;
-  const S0 = { opt: true, tod: 0.3, wind: 1, drag: 0, walk: false, dpr: 0, knob: {} };
+  const BASE = { opt: true, tod: 0.3, wind: 1, drag: 0, walk: false, dpr: 0, knob: {} };
   const SC = [
     ['opt day idle', {}],
     ['opt golden idle', { tod: 0.64 }],
@@ -1200,7 +1200,7 @@ async function runBench(){
   say2('The benchmark starts in 3 seconds. Do not touch the screen.');
   await wait(3000);
   for (let i = 0; i < SC.length; i++){
-    const [name, cfg0] = SC[i], cfg = { ...S0, ...cfg0, knob: { ...cfg0.knob } };
+    const [name, cfg0] = SC[i], cfg = { ...BASE, ...cfg0, knob: { ...cfg0.knob } };
     say2(`Scenario ${i + 1} of ${SC.length}: ${name}. Do not touch the screen.`);
     if (OPT !== cfg.opt) $('optBtn').click();
     for (const k in KNOB) KNOB[k] = cfg.knob[k] !== false;
