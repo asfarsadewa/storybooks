@@ -356,8 +356,21 @@ Test M1 on the iPhone in its first week. Safari SVG baking is the biggest risk t
 - `book.json`: `firstScene`, and `sceneMusic` (the mood of each scene; a resumed game gets music).
 - The music module plays musikmodel documents (vendored at commit 80ef643). It ducks to 45% under dialogue and puzzles.
 
+**iPhone 14 Pro benches of the new scenes** (Safari, pixel ratio 1.5, `?book=kai&scene=<id>&bench`):
+
+| Scenario | Crash (afternoon) | Valda (night) |
+|---|---|---|
+| The story's time, idle | 60 fps, 0% slow, 137 draws | 60 fps, 0% slow, 148 draws |
+| The kid at the light at night | (no light) | 60 fps, 0% slow (the light has no lamp shadows) |
+| Walking, windy | 60 fps, 0–1% slow | 60 fps, 0–2% slow |
+| Dragging, flying | 60 fps, 0% slow | 60 fps, 0% slow |
+| Refill after a drag, day | 59 fps, 3% slow | 59 fps, 2% slow |
+| Refill after a drag, golden hour | 57 fps, 10% slow | 58 fps, 4% slow |
+
+Both scenes pass the definition of done (§10) in every scenario the story uses. They are lighter than the reference meadow.
+
 **Open:**
-1. A batched iPhone bench of the new scenes (crash, Valda) and a full play on the phone.
+1. A full play on the phone: music, the stage card and the puppets over the diorama. No bench covers these together yet.
 2. The kid has no outline (§4.8 of the findings). The golden-hour refill is at 6% slow frames. Book one stages no scene at golden hour, and its lamp light has no shadows.
 3. Sound effects (`sfx`) are valid tags with no sounds yet.
 4. A low-cost tablet.
