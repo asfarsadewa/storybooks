@@ -226,7 +226,47 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 
 **Next steps:** an uneven ground height in both IK targets; Pip walking (not trotting) at slow speeds (raise its thresholds or shorten its stride); sounds per footfall from the musikmodel synth (the chart already knows every contact).
 
-## 6. Decisions so far
+## 6. Synthesized dialogue voices ("babble")
+
+**Prototype:** `08-babble-voices.html`. Pip, Mira and Hoot the owl have a short conversation. Every sound is synthesized live in Web Audio, with no recordings. The text types out in time with the voice, and the mouths move with the actual loudness.
+
+**Three styles** (switchable live):
+
+| Style | How | Feels like |
+|---|---|---|
+| Blip | one oscillator tone per letter (square, triangle or sawtooth by speaker), 45 ms, low-passed | Undertale |
+| Chatter | square-wave ticks on every other letter, each falling slightly in pitch, band-passed, plus a 12 ms high-passed noise click | Golden Sun |
+| Babble | a "glottal" buzz (all harmonics at `1/n^1.5`) through 3 parallel band-pass formants (F1/F2/F3) per vowel, with noise-burst consonant onsets | Animal Crossing |
+
+**Babble details:**
+- **Vowel formants:** adult values (e.g. `a` 800/1250/2600 Hz, `i` 320/2300/3000), scaled per speaker by `fs` (Pip 1.55, Mira 1.18, Hoot 0.84). A smaller creature means higher formants, independent of pitch.
+- **Every letter is a syllable.** A vowel letter sounds itself. A consonant gets an onset (plosive: a 14 ms band-passed burst; `s`/`z`: 45 ms high-passed hiss; `f`/`v`/`h`: 35 ms band-passed noise; `m`/`n`/`l`/`r`/`w`: no burst, a softer vowel), then borrows the next vowel in its word.
+- Breath noise through F2 per speaker (Hoot is breathiest) and vibrato through an LFO on the source frequency.
+
+**Voices** (`f0`, `fs`, seconds per letter): Mira 290 Hz / 1.18 / 0.058; Pip 520 Hz / 1.55 / 0.042; Hoot 125 Hz / 0.84 / 0.082 (+35% gain).
+
+**Prosody:**
+- **Declination:** pitch × `1.08 − 0.16 · p` across the sentence.
+- **Questions:** rise over the last 30%.
+- **Exclamations:** ×1.12 pitch, ×0.88 letter time, ×1.15 loudness.
+- **Word stress:** the first syllable of each word gets ×1.07 pitch and ×1.2 loudness.
+- **Rests:** space = 0.55 letters; comma = 4; `. ! ?` = 7; `…` = 10.
+
+**Determinism:** per-letter jitter is `hash(strHash(line), index)`, so the same line always sounds identical, the same `(generator, params, seed)` rule as the visuals.
+
+**Engineering:**
+- The text reveal reads `AudioContext.currentTime` against the planned event times, so text and sound can't drift apart.
+- Each line plays on its own gain bus. Skipping ramps that bus to 0 over 40 ms and disconnects it, so there are no clicks and no orphaned nodes.
+- Every node uses an exponential attack and release envelope, which avoids clicks.
+- **Mouth flap** comes from an `AnalyserNode` RMS on the output (`× 9`, clamped), smoothed by half each frame.
+- A `DynamicsCompressor` (−18 dB, 4:1) sits on the master.
+- The audio context is created on the first tap (browser autoplay rules). On iPhone, Web Audio is silent when the ringer switch is on silent, so tell players.
+
+**Verification without ears:** render each style × voice through `OfflineAudioContext` and check peak, RMS and NaNs. Measured on the line "Hi Pip! Why do you look so worried?": peaks 0.22–0.47, RMS 0.03–0.07, no NaNs, no clipping. This makes a good automated test for audio generators, alongside the visual regression idea.
+
+**Fits with:** tiny-voca (an Apache-2.0, about 18 MB English TTS model that runs in the browser) for real read-aloud narration, with babble for character chatter. Pitch and formant shifting on its two voices could give a whole cast.
+
+## 7. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
 - **Everything is `(generator, params, seed)` → a baked bitmap or atlas, cached.** Generate once, play many times.
@@ -234,11 +274,12 @@ Airborne windows are computed from the pattern (sampled at 400 steps), not writt
 - **Story:** Ink (inkjs). Don't write a custom format.
 - **Music:** musikmodel's `shared/` modules (no DOM, importable in Node) with adaptive sections per mood. Improve the oscillator trumpet and strings with physical modelling.
 - **Sound effects:** an sfxr-style synth built from the same tricks (noise, sweeps, filters).
+- **Dialogue voices:** babble (§6) for character chatter, and a small TTS model (tiny-voca) for read-aloud narration. Voice acting stays optional.
 - **Puppets:** the rig model from `twilight-bugle` (pivot, attach, rest, z, mirror, string ties) maps onto SVG groups. Add blinks, eye direction toward the tap, mouth shapes, and a mouth flap driven by read-aloud word boundary events.
 - **Kids:** read-aloud with word highlighting, big tap targets, autosave, no timers, no fail states (wrong choices get a funny reaction), no accounts, no analytics, no network during play.
 - **The only asset that is not code-first:** voice acting.
 
-## 7. Open questions
+## 8. Open questions
 
 1. Should the dialogue card stay a 2D overlay, or should puppets pop out of the diorama as Twilight Bugle-style cardboard (Three.js `ExtrudeGeometry` from the SVG paths, with SVG rendered to a texture)?
 2. Should map characters get a thin ink outline for readability?
