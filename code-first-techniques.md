@@ -241,7 +241,8 @@ The bake scale is about the display scale (`min(2.4, fit.k × 1.05)`), so bitmap
 
 **Pitfalls:**
 - Put `addEventListener('error')` in its own `<script>` before the main one. A syntax error in the main script stops that same script from registering its own error handler, and the page just sits on "loading".
-- Not yet tested on Safari. Rendering an SVG data URL with filters into `Image` should work there, but confirm it.
+- **Safari applies the filters** (tested in M1 of `storybook-game`, iPhone 14 Pro, iOS 18.7). Tako's 11 parts baked in 163 ms with no empty parts. A filter probe proves it on every device: a square swatch through the `paint` filter must come out with a ragged edge (the displacement map), and a swatch through a blur must come out with soft edges. Measured edge spread 0.76 px (0 without the filter) and 87% soft pixels in the edge band. A first probe that measured the mottling failed even in Chromium, because the noise barely changes across a small swatch. Measure the displacement instead.
+- The rig plays at 60 fps with 0% slow frames on the same phone (0.25 ms CPU per frame, pixel ratio 2).
 
 **Opinion:** this is the stage-mode puppet technique. It's the `twilight-bugle` rig (pivots, attach points, hierarchy) with parts generated from code instead of painted by an image model.
 
