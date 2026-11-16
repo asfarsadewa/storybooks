@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>The Night Reader — Gaits</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#efe7d8;font-family:ui-rounded,"Nunito","Trebuchet MS",system-ui,sans-serif;color:#3b2a2a;-webkit-user-select:none;user-select:none;touch-action:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #src{position:absolute;left:-10000px;top:0;width:600px;height:760px;visibility:hidden}
+  .bar{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:5px;z-index:5;flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 16px)}
+  .bar button{border:0;border-radius:999px;padding:8px 12px;font:inherit;font-size:13px;font-weight:700;background:#fffaf0;color:#3b2a2a;box-shadow:0 2px 0 #d8c9ad}
+  .bar button.on{background:#2b9a8c;color:#fff;box-shadow:0 2px 0 #1f7d72}
+  .bar button.stop{background:#e5664a;color:#fff;box-shadow:0 2px 0 #b9472f}
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;opacity:.7}
+  #err{position:fixed;left:10px;right:10px;top:96px;background:#fff3f0;color:#a33;border-radius:10px;padding:8px 10px;font-size:12px;display:none;z-index:20}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="bar">
+  <button data-gait="walk" class="on">Walk</button><button data-gait="run">Run</button><button data-gait="skip">Skip</button><button data-gait="sneak">Sneak</button>
+  <button id="stop" class="stop">Stop</button><button id="rig">Rig</button>
+</div>
+<div id="loading">Painting the puppet…</div>
+<div id="err"></div>
+<script>
+addEventListener('error', e => { const el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Error: ' + e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''); });
+addEventListener('unhandledrejection', e => { const el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Error: ' + (e.reason && e.reason.message || e.reason); });
+</script>
+
+<!-- ============ the character in profile, facing right, split into rig parts ============
+     Every part is drawn in "local" units with the hip at (0,0), y down, inside translate(300 470). -->
+<svg id="src" viewBox="0 0 600 760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="3" seed="4" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="3" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="paint" x="-8%" y="-8%" width="116%" height="116%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="3" seed="2" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="4.5" xChannelSelector="R" yChannelSelector="G" result="wob"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.016 0.08" numOctaves="4" seed="9" result="mot"/>
+      <feColorMatrix in="mot" type="saturate" values="0" result="mg"/>
+      <feComponentTransfer in="mg" result="mg2"><feFuncR type="linear" slope="0.42" intercept="0.74"/><feFuncG type="linear" slope="0.42" intercept="0.74"/><feFuncB type="linear" slope="0.42" intercept="0.74"/></feComponentTransfer>
+      <feBlend in="wob" in2="mg2" mode="multiply" result="m"/>
+      <feComposite in="m" in2="wob" operator="in"/>
+    </filter>
+    <filter id="dry" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="5" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="5" xChannelSelector="R" yChannelSelector="G" result="wob"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="2" seed="11" result="sp"/>
+      <feColorMatrix in="sp" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 -2.2 1.75" result="holes"/>
+      <feComposite in="wob" in2="holes" operator="in"/>
+    </filter>
+    <filter id="fuzz" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="turbulence" baseFrequency="0.2" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="11" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="blush" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+    <pattern id="knit" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#2b9a8c"/><path d="M0 3 L6 8 L12 3" stroke="#268b7e" stroke-width="2" fill="none"/></pattern>
+    <pattern id="knitDk" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#22806f"/><path d="M0 3 L6 8 L12 3" stroke="#1d7264" stroke-width="2" fill="none"/></pattern>
+    <pattern id="fairisle" width="18" height="30" patternUnits="userSpaceOnUse">
+      <rect width="18" height="30" fill="#1f7d72"/><rect width="18" height="3" fill="#f2c46d"/><rect y="27" width="18" height="3" fill="#f2c46d"/>
+      <path d="M9 7 L14 15 L9 23 L4 15 Z" fill="#f7f1e5"/><path d="M9 12 L11 15 L9 18 L7 15 Z" fill="#e5664a"/>
+    </pattern>
+    <pattern id="tights" width="20" height="11" patternUnits="userSpaceOnUse"><rect width="20" height="11" fill="#f3e6cf"/><rect width="20" height="5.5" fill="#e5664a"/></pattern>
+    <pattern id="tightsDk" width="20" height="11" patternUnits="userSpaceOnUse"><rect width="20" height="11" fill="#cdbfa6"/><rect width="20" height="5.5" fill="#b9503a"/></pattern>
+    <pattern id="ribs" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#d4952f"/><rect width="3" height="8" fill="#c3852a"/></pattern>
+    <clipPath id="sweaterClip"><path d="M -40 -132 C -60 -128 -66 -90 -62 -40 C -60 -10 -62 10 -60 18 L 64 18 C 62 0 60 -30 58 -60 C 56 -100 50 -126 30 -132 Z"/></clipPath>
+  </defs>
+
+  <!-- far side (darker) -->
+  <g data-part="armUF"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-13" y="-118" width="26" height="68" rx="12" fill="url(#knitDk)"/></g></g>
+  <g data-part="armLF"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-11" y="-60" width="22" height="58" rx="10" fill="url(#knitDk)"/><rect x="-12" y="-12" width="24" height="9" rx="3" fill="#c99a3e"/><circle cx="2" cy="7" r="11" fill="#d9a888"/></g></g>
+  <g data-part="thighF"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-13" y="-2" width="26" height="84" rx="12" fill="url(#tightsDk)"/></g></g>
+  <g data-part="shinF"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-11" y="70" width="22" height="80" rx="10" fill="url(#tightsDk)"/></g></g>
+  <g data-part="bootF"><g transform="translate(300 470)" filter="url(#paint)"><path d="M -14 134 L 13 134 L 15 148 C 30 148 42 151 44 158 L 44 162 L -16 162 L -16 148 Z" fill="#6e4a30"/><rect x="-17" y="160" width="62" height="6" rx="3" fill="#4a3222"/></g></g>
+
+  <!-- hair behind the head -->
+  <g data-part="hair"><g transform="translate(300 470)"><g id="hairBits" filter="url(#paint)" fill="#2f2226"></g></g></g>
+  <!-- backpack with the hedgehog peeking out, and the scarf tail -->
+  <g data-part="hh"><g transform="translate(300 470)">
+    <g id="spines" filter="url(#dry)"></g>
+    <g filter="url(#paint)"><ellipse cx="-58" cy="-128" rx="15" ry="12" fill="#f1dcc0"/></g>
+    <circle cx="-44" cy="-129" r="4.5" fill="#2f2226" filter="url(#rough)"/>
+    <ellipse cx="-58" cy="-133" rx="3.2" ry="4" fill="#2f2226" filter="url(#rough)"/><circle cx="-57" cy="-134.5" r="1.2" fill="#fffaf0"/>
+    <ellipse cx="-56" cy="-122" rx="5" ry="3.5" fill="#ef7f6a" opacity=".5" filter="url(#blush)"/>
+  </g></g>
+  <g data-part="pack"><g transform="translate(300 470)" filter="url(#paint)">
+    <rect x="-98" y="-120" width="48" height="86" rx="14" fill="#b5793f"/>
+    <path d="M -100 -122 Q -74 -134 -48 -122 L -48 -98 Q -74 -88 -100 -98 Z" fill="#9a6431"/>
+    <rect x="-79" y="-102" width="10" height="12" rx="2" fill="#f2c46d"/>
+    <rect x="-92" y="-66" width="36" height="20" rx="6" fill="#a46c37"/>
+  </g></g>
+  <g data-part="scarfTail"><g transform="translate(300 470)" filter="url(#paint)">
+    <path d="M -40 -140 C -52 -110 -58 -72 -56 -34 L -36 -32 C -38 -70 -32 -110 -22 -138 Z" fill="#e5664a"/>
+    <path d="M -54 -82 L -34 -80 M -55 -60 L -36 -58" stroke="#f2c46d" stroke-width="7"/>
+    <path d="M -54 -32 l -2 10 M -48 -32 l -1 11 M -42 -32 l 1 10" stroke="#e5664a" stroke-width="3" stroke-linecap="round"/>
+  </g></g>
+
+  <!-- skirt, legs (near), sweater -->
+  <g data-part="thighN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-13" y="-2" width="26" height="84" rx="12" fill="url(#tights)"/></g></g>
+  <g data-part="shinN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-11" y="70" width="22" height="80" rx="10" fill="url(#tights)"/></g></g>
+  <g data-part="bootN"><g transform="translate(300 470)" filter="url(#paint)"><path d="M -14 134 L 13 134 L 15 148 C 30 148 42 151 44 158 L 44 162 L -16 162 L -16 148 Z" fill="#8b5e3c"/><rect x="-17" y="160" width="62" height="6" rx="3" fill="#5c3d2e"/><circle cx="8" cy="142" r="2.5" fill="#f2c46d"/></g></g>
+  <g data-part="skirt"><g transform="translate(300 470)" filter="url(#paint)">
+    <path d="M -50 6 L -68 60 Q 0 72 70 60 L 56 6 Z" fill="#9c6bae"/>
+    <path d="M -30 10 L -40 64 M -6 10 L -8 67 M 18 10 L 22 66 M 40 10 L 50 62" stroke="#835595" stroke-width="3"/>
+  </g></g>
+  <g data-part="sweater"><g transform="translate(300 470)">
+    <g filter="url(#paint)">
+      <path d="M -40 -132 C -60 -128 -66 -90 -62 -40 C -60 -10 -62 10 -60 18 L 64 18 C 62 0 60 -30 58 -60 C 56 -100 50 -126 30 -132 Z" fill="url(#knit)"/>
+      <g clip-path="url(#sweaterClip)"><rect x="-70" y="-74" width="140" height="30" fill="url(#fairisle)"/></g>
+    </g>
+    <g filter="url(#paint)">
+      <path d="M -40 -128 L -58 -36" stroke="#9a6431" stroke-width="7" stroke-linecap="round"/>
+      <rect x="-14" y="-160" width="30" height="40" rx="8" fill="#e9b593"/>
+      <path d="M -46 -146 C -40 -162 42 -164 48 -146 C 54 -126 42 -110 2 -110 C -36 -110 -52 -126 -46 -146 Z" fill="#e5664a"/>
+      <path d="M -36 -140 C -20 -124 24 -124 40 -140" stroke="#c9523a" stroke-width="4" fill="none"/>
+      <ellipse cx="44" cy="-122" rx="13" ry="12" fill="#d4573d"/>
+    </g>
+  </g></g>
+
+  <!-- head stack -->
+  <g data-part="face"><g transform="translate(300 470)">
+    <g filter="url(#paint)">
+      <ellipse cx="12" cy="-236" rx="86" ry="90" fill="#f7cfb0"/>
+      <ellipse cx="99" cy="-226" rx="12" ry="11" fill="#f7cfb0"/>
+      <ellipse cx="-14" cy="-226" rx="15" ry="21" fill="#efbb97"/>
+    </g>
+    <path d="M -10 -238 Q -2 -226 -10 -214" stroke="#d99a7a" stroke-width="3" fill="none" filter="url(#rough)"/>
+    <circle cx="104" cy="-224" r="5" fill="#e8806a" opacity=".55" filter="url(#rough)"/>
+    <ellipse cx="56" cy="-200" rx="26" ry="16" fill="#ef7f6a" opacity=".55" filter="url(#blush)"/>
+    <g id="freckles" fill="#b8664f" opacity=".75" filter="url(#rough)"></g>
+  </g></g>
+  <g data-part="eyesC"><g transform="translate(300 470)" filter="url(#rough)" stroke="#3b2a2a" stroke-linecap="round" fill="none"><path d="M46 -236 Q58 -226 70 -236" stroke-width="4.5"/><path d="M48 -233 l-7 4 M52 -230 l-4 6" stroke-width="2.5"/></g></g>
+  <g data-part="eyesO"><g transform="translate(300 470)" filter="url(#rough)"><ellipse cx="60" cy="-238" rx="7.5" ry="10" fill="#2f2226"/><circle cx="62.5" cy="-242" r="2.8" fill="#fffaf0"/><path d="M53 -246 l-6 -4" stroke="#3b2a2a" stroke-width="2.5" stroke-linecap="round"/></g></g>
+  <g data-part="brow"><g transform="translate(300 470)" filter="url(#rough)"><path d="M48 -262 Q60 -270 72 -262" stroke="#3b2a2a" stroke-width="3.5" stroke-linecap="round" fill="none"/></g></g>
+  <g data-part="mouth"><g transform="translate(300 470)" filter="url(#rough)"><path d="M70 -196 Q80 -188 89 -197" stroke="#3b2a2a" stroke-width="3.5" stroke-linecap="round" fill="none"/></g></g>
+  <g data-part="mouthO"><g transform="translate(300 470)" filter="url(#rough)"><path d="M68 -199 Q80 -178 91 -200 Q80 -194 68 -199 Z" fill="#7a3a34" stroke="#3b2a2a" stroke-width="2.5" stroke-linejoin="round"/></g></g>
+  <g data-part="bangs"><g transform="translate(300 470)"><g id="bangBits" filter="url(#paint)" fill="#2f2226"></g></g></g>
+  <g data-part="earring"><g transform="translate(300 470)" filter="url(#rough)" fill="#f2c46d"><circle cx="-14" cy="-206" r="2" fill="#d4952f"/><path d="M-18 -201 a8 8 0 1 0 9 11 a6 6 0 1 1 -9 -11z"/></g></g>
+  <g data-part="beanie"><g transform="translate(300 470)" filter="url(#paint)">
+    <path d="M -82 -262 C -88 -330 -20 -360 20 -358 C 70 -356 104 -320 100 -272 Z" fill="#e8b04a"/>
+    <path d="M -60 -320 Q 10 -346 80 -320 M -74 -292 Q 10 -322 94 -294" stroke="#d4952f" stroke-width="4" fill="none" opacity=".7"/>
+    <path d="M -88 -270 Q 10 -298 104 -280 L 106 -250 Q 10 -268 -90 -240 Z" fill="url(#ribs)"/>
+  </g></g>
+  <g data-part="pom"><g transform="translate(300 470)"><circle cx="14" cy="-366" r="26" fill="#f3e6cf" filter="url(#fuzz)"/><circle cx="8" cy="-372" r="12" fill="#fffaf0" opacity=".5" filter="url(#fuzz)"/></g></g>
+
+  <!-- near arm on top -->
+  <g data-part="armUN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-13" y="-118" width="26" height="68" rx="12" fill="url(#knit)"/></g></g>
+  <g data-part="armLN"><g transform="translate(300 470)" filter="url(#paint)"><rect x="-11" y="-60" width="22" height="58" rx="10" fill="url(#knit)"/><rect x="-12" y="-12" width="24" height="9" rx="3" fill="#e8b04a"/><circle cx="2" cy="7" r="11" fill="#f2c4a2"/></g></g>
+</svg>
+
+<script>
+(async () => {
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+let s = 7; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ---------------- procedural bits of the drawing ----------------
+{ const hb = document.getElementById('hairBits');
+  [[-40, -262, 58], [-64, -214, 54], [-54, -168, 46], [-20, -152, 38], [-74, -252, 40], [0, -300, 52], [-34, -304, 46], [-88, -200, 34], [-80, -160, 30]].forEach(([cx, cy, r]) => el('circle', { cx, cy, r }, hb));
+  const curls = el('g', { stroke: '#4a363a', 'stroke-width': 3.5, fill: 'none', 'stroke-linecap': 'round' }, hb); s = 77;
+  for (let i = 0; i < 12; i++){ const cx = -100 + rnd() * 70, cy = -280 + rnd() * 140, r = 6 + rnd() * 6, a = rnd() * 6;
+    el('path', { d: `M${cx + Math.cos(a) * r} ${cy + Math.sin(a) * r} A${r} ${r} 0 1 1 ${cx + Math.cos(a + 4) * r} ${cy + Math.sin(a + 4) * r}` }, curls); }
+  const bb = document.getElementById('bangBits');
+  for (let x = 30; x <= 96; x += 13) el('circle', { cx: x, cy: -262 + (x - 30) * 0.22, r: 13 }, bb);
+  el('circle', { cx: -50, cy: -256, r: 14 }, bb);
+  const fr = document.getElementById('freckles'); s = 5;
+  for (let i = 0; i < 6; i++) el('circle', { cx: 56 + (rnd() - .5) * 34, cy: -206 + (rnd() - .5) * 12, r: 1.6 + rnd() * 1.2 }, fr);
+  const sp = document.getElementById('spines'); s = 31;
+  const ring = (cx, cy, rx, ry, n, len, col) => { let d = '';
+    for (let i = 0; i <= n; i++){ const a = Math.PI * 0.95 + (i / n) * Math.PI * 1.1, am = a + Math.PI / n / 1.0, r2 = 1 + len * (.8 + rnd() * .4);
+      d += (i ? 'L' : 'M') + (cx + Math.cos(a) * rx).toFixed(1) + ' ' + (cy + Math.sin(a) * ry).toFixed(1) + 'L' + (cx + Math.cos(am) * rx * r2).toFixed(1) + ' ' + (cy + Math.sin(am) * ry * r2).toFixed(1); }
+    el('path', { d: d + 'Z', fill: col }, sp); };
+  ring(-76, -122, 26, 20, 16, .38, '#7a5236'); ring(-76, -120, 21, 16, 13, .34, '#9a6a45'); ring(-76, -118, 14, 11, 10, .3, '#b48055');
+}
+
+// ---------------- bake each part through its filters, once ----------------
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const src = document.getElementById('src');
+let DPR, W, H, K, GROUND;      // K = device px per world unit; GROUND = screen y of the ground line
+function layout(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = cv.width = Math.max(1, Math.floor(innerWidth * DPR)); H = cv.height = Math.max(1, Math.floor(innerHeight * DPR));
+  K = Math.min(H * 0.5 / 560, W * 0.7 / 330);
+  GROUND = H * 0.66;
+}
+layout();
+const BAKE = clamp(K * 1.1, 0.6, 2.4);
+const ser = new XMLSerializer();
+async function bakeSVG(svgEl, x0, y0, w, h){
+  svgEl.setAttribute('viewBox', `${x0} ${y0} ${w} ${h}`);
+  svgEl.setAttribute('width', Math.ceil(w * BAKE)); svgEl.setAttribute('height', Math.ceil(h * BAKE));
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(ser.serializeToString(svgEl));
+  await img.decode();
+  const c = document.createElement('canvas'); c.width = Math.ceil(w * BAKE); c.height = Math.ceil(h * BAKE);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c;
+}
+const O = [300, 470];                       // local origin (hip) inside the source SVG
+const parts = {};
+async function bakePart(name){
+  const g = src.querySelector(`[data-part="${name}"]`), bb = g.getBBox(), m = name === 'pom' ? 26 : 12;
+  const x0 = Math.floor(bb.x - m), y0 = Math.floor(bb.y - m), w = Math.ceil(bb.width + 2 * m), h = Math.ceil(bb.height + 2 * m);
+  const c = src.cloneNode(true); c.removeAttribute('id'); c.removeAttribute('style');
+  c.querySelectorAll('[data-part]').forEach(p => { if (p.getAttribute('data-part') !== name) p.remove(); });
+  parts[name] = { cv: await bakeSVG(c, x0, y0, w, h), x: x0 - O[0], y: y0 - O[1], w, h };
+}
+const names = [...src.querySelectorAll('[data-part]')].map(p => p.getAttribute('data-part'));
+for (let i = 0; i < names.length; i += 6) await Promise.all(names.slice(i, i + 6).map(bakePart));
+
+// scenery props: tiny SVGs sharing the same filters, base at (0,0)
+const defs = src.querySelector('defs').outerHTML;
+const PROPS = {
+  tree: { box: [-80, -220, 160, 224], svg: `<rect x="-9" y="-96" width="18" height="98" rx="6" fill="#7a5236"/><g fill="#4f9a4a"><circle cx="0" cy="-140" r="54"/><circle cx="-40" cy="-112" r="36"/><circle cx="40" cy="-116" r="38"/></g><circle cx="-6" cy="-176" r="34" fill="#66b05a"/>` },
+  pine: { box: [-60, -240, 120, 244], svg: `<rect x="-7" y="-40" width="14" height="42" fill="#7a5236"/><path d="M0 -236 L44 -150 L-44 -150 Z M0 -190 L54 -90 L-54 -90 Z M0 -140 L60 -36 L-60 -36 Z" fill="#2f7a55"/><path d="M0 -236 L20 -196 L-6 -200 Z" fill="#3e9468"/>` },
+  bush: { box: [-60, -64, 120, 68], svg: `<g fill="#5aa357"><circle cx="-26" cy="-24" r="26"/><circle cx="6" cy="-34" r="32"/><circle cx="34" cy="-22" r="24"/></g><g fill="#e5664a"><circle cx="-14" cy="-36" r="4"/><circle cx="20" cy="-46" r="4"/><circle cx="34" cy="-26" r="3.5"/></g>` },
+  flowers: { box: [-30, -44, 60, 48], svg: `<path d="M-14 0 L-16 -26 M2 0 L4 -32 M16 0 L18 -22" stroke="#5c8f6b" stroke-width="3" fill="none"/><circle cx="-16" cy="-28" r="6" fill="#f2c46d"/><circle cx="4" cy="-34" r="6" fill="#ef7f6a"/><circle cx="18" cy="-24" r="5" fill="#c7a6d9"/>` },
+  mushroom: { box: [-24, -40, 48, 44], svg: `<rect x="-6" y="-20" width="12" height="22" rx="4" fill="#f3e6cf"/><path d="M-20 -18 Q0 -42 20 -18 Z" fill="#e5664a"/><circle cx="-8" cy="-26" r="3" fill="#fffaf0"/><circle cx="7" cy="-28" r="2.5" fill="#fffaf0"/>` },
+  tuft: { box: [-26, -40, 52, 44], svg: `<path d="M-18 0 Q-16 -20 -24 -30 M-6 0 Q-6 -26 -10 -38 M6 0 Q8 -24 14 -36 M16 0 Q20 -16 26 -24" stroke="#4f8f4a" stroke-width="5" stroke-linecap="round" fill="none"/>` },
+};
+const propImg = {};
+for (const k in PROPS){
+  const p = PROPS[k], doc = new DOMParser().parseFromString(`<svg xmlns="${NS}">${defs}<g filter="url(#paint)">${p.svg}</g></svg>`, 'image/svg+xml').documentElement;
+  propImg[k] = { cv: await bakeSVG(doc, ...p.box), box: p.box };
+}
+document.getElementById('loading').style.display = 'none';
+
+// paper grain + pigment mottle tiles
+function h3(x, y, z){ let q = (x * 374761393 + y * 668265263 + z * 1442695041) | 0; q = Math.imul(q ^ (q >>> 13), 1274126177); return ((q ^ (q >>> 16)) >>> 0) / 4294967296; }
+const grain = document.createElement('canvas'); grain.width = grain.height = 256;
+{ const gx = grain.getContext('2d'), im = gx.createImageData(256, 256);
+  for (let i = 0; i < 65536; i++){ const v = 196 + (h3(i % 256, i >> 8, 5) * 59) | 0; im.data[i*4] = v; im.data[i*4+1] = v * .97; im.data[i*4+2] = v * .92; im.data[i*4+3] = 255; }
+  gx.putImageData(im, 0, 0); }
+const grainPat = ctx.createPattern(grain, 'repeat');
+
+// ================= the gait engine =================
+// Lengths (local units): thigh pivot (0,4) -> knee (0,76) -> ankle (0,146); sole 18 below the ankle.
+const L1 = 72, L2 = 70, ANK = 18, HIP_REST = -(4 + L1 + L2 + ANK);    // hip height above the ground when standing straight
+// A gait = when each foot is on the ground (stance windows in cycle phase) + how the body moves.
+// near = the foot nearer the viewer. Windows are { s: start, len } in [0,1) cycle phase.
+const GAITS = {
+  walk:  { f: 0.95, L: 170, near: [{ s: 0, len: .62 }], far: [{ s: .5, len: .62 }], stepH: 20, pend: 5, air: 0, dip: 0, hip: .975, lean: .05,
+           arm: .9, armBias: 0, elbow: .25, elbowK: .5, strike: -.3, toeOff: .55, tiptoe: false, mood: 'open' },
+  run:   { f: 1.45, L: 360, near: [{ s: 0, len: .36 }], far: [{ s: .5, len: .36 }], stepH: 58, pend: 0, air: 14, dip: 9, hip: .93, lean: .2,
+           arm: 1.25, armBias: .1, elbow: 1.45, elbowK: .2, strike: -.05, toeOff: .75, tiptoe: false, mood: 'grin' },
+  skip:  { f: .85, L: 300, near: [{ s: 0, len: .17 }, { s: .25, len: .15 }], far: [{ s: .5, len: .17 }, { s: .75, len: .15 }], stepH: 34, pend: 0, air: 28, dip: 6, hip: .95, lean: .06,
+           arm: 1.5, armBias: .2, elbow: .55, elbowK: .3, strike: -.1, toeOff: .6, tiptoe: false, mood: 'grin' },
+  sneak: { f: .5, L: 120, near: [{ s: 0, len: .74 }], far: [{ s: .5, len: .74 }], stepH: 50, pend: 2, air: 0, dip: 0, hip: .86, lean: .16,
+           arm: .25, armBias: .85, elbow: 1.9, elbowK: .1, strike: .2, toeOff: .5, tiptoe: true, mood: 'o' },
+};
+const inWindows = (wins, ph) => { for (const w of wins) if (((ph - w.s) % 1 + 1) % 1 < w.len) return w; return null; };
+// airborne windows (neither foot down) for a gait, used to lift the hip into a little flight arc
+function flights(g){
+  const out = []; let start = -1;
+  for (let i = 0; i <= 400; i++){ const ph = i / 400, air = !inWindows(g.near, ph) && !inWindows(g.far, ph);
+    if (air && start < 0) start = ph; if (!air && start >= 0){ out.push({ s: start, len: ph - start }); start = -1; } }
+  return out;
+}
+for (const k in GAITS) GAITS[k].flights = flights(GAITS[k]);
+
+// state
+const P = { gait: 'walk', next: 'walk', ph: 0, hipX: 0, v: 0, dir: 1, flip: 1, flipT: 0,
+  state: 'moving',             // moving | settling | turning | idle
+  wantMove: true, wantDir: 1, lean: 0, hipY: HIP_REST };
+const g0 = GAITS.walk;
+const num = Object.fromEntries(Object.entries(g0).filter(([, v]) => typeof v === 'number'));     // blended numeric params
+const feet = {
+  near: { x: 10, planted: true, sw: null, prevStance: true, psi: 0, lift: 0, hist: [] },
+  far:  { x: -10, planted: true, sw: null, prevStance: true, psi: 0, lift: 0, hist: [] },
+};
+const prints = [];
+
+function startSwing(foot, toX, dur, h){
+  foot.sw = { from: foot.x, to: toX, t: 0, dur: Math.max(0.05, dur), h };
+  foot.planted = false;
+}
+function neutral(which){ return P.hipX + P.dir * (which === 'near' ? 9 : -9); }
+
+function stepGait(dt){
+  const g = GAITS[P.gait];
+  // blend numeric params toward the gait we're in (pattern windows switch at the cycle boundary)
+  for (const k in num) num[k] = lerp(num[k], g[k], Math.min(1, dt * 5));
+  const speed = num.L * num.f;
+  if (P.state === 'moving'){
+    P.v = lerp(P.v, speed, Math.min(1, dt * 4));
+    const prev = P.ph;
+    P.ph += num.f * dt * Math.min(1, P.v / speed + 0.25);
+    if (P.ph >= 1){ P.ph -= 1; if (P.next !== P.gait) P.gait = P.next; }
+    P.hipX += P.dir * P.v * dt;
+    const G = GAITS[P.gait];
+    for (const which of ['near', 'far']){
+      const foot = feet[which], win = inWindows(G[which], P.ph), stance = !!win;
+      // stance -> swing edge in the pattern: lift off and aim for where the hip will be at the middle of the next stance
+      if (foot.prevStance && !stance && foot.planted){
+        let best = 9; for (const w of G[which]){ const d = ((w.s - P.ph) % 1 + 1) % 1; if (d < best){ best = d; foot._len = w.len; } }
+        const tLand = best / num.f, tMid = (best + foot._len / 2) / num.f;
+        startSwing(foot, P.hipX + P.dir * (P.v * tMid + 4), tLand, num.stepH * (best < .12 ? 0.45 : 1));   // short hops (skip) lift less
+      }
+      foot.prevStance = stance;
+    }
+  } else {
+    // settling / turning / idle: the hip coasts to a stop, feet tidy up under it one at a time
+    P.v *= Math.exp(-dt * 7); P.hipX += P.dir * P.v * dt;
+    if (P.state === 'settling'){
+      for (const which of ['near', 'far']){
+        const foot = feet[which];
+        if (foot.sw) continue;
+        const other = feet[which === 'near' ? 'far' : 'near'];
+        if (Math.abs(foot.x - neutral(which)) > 7 && !other.sw) startSwing(foot, neutral(which), 0.26, 16);
+      }
+      if (!feet.near.sw && !feet.far.sw && Math.abs(feet.near.x - neutral('near')) <= 7 && Math.abs(feet.far.x - neutral('far')) <= 7 && P.v < 5){
+        P.state = P.wantDir !== P.dir ? 'turning' : P.wantMove ? 'moving' : 'idle'; P.flipT = 0;
+        if (P.state === 'moving') resetPhase();
+      }
+    } else if (P.state === 'turning'){
+      P.flipT += dt / 0.4;
+      if (P.flipT >= 0.5 && P.dir !== P.wantDir){ P.dir = P.wantDir; feet.near.x = neutral('near'); feet.far.x = neutral('far'); }
+      P.flip = Math.max(0.04, Math.abs(Math.cos(Math.PI * Math.min(1, P.flipT))));   // card turns edge-on, then shows its other face
+      if (P.flipT >= 1){ P.flip = 1; P.state = P.wantMove ? 'moving' : 'idle'; if (P.state === 'moving') resetPhase(); }
+    } else if (P.state === 'idle' && P.wantMove){ P.state = 'moving'; resetPhase(); }
+  }
+  // advance swings (the timer decides landing, so gait changes never pop a foot into the ground)
+  for (const which of ['near', 'far']){
+    const foot = feet[which], sw = foot.sw;
+    if (sw){
+      sw.t += dt;
+      const u = clamp(sw.t / sw.dur, 0, 1), e = u * u * (3 - 2 * u);
+      foot.x = lerp(sw.from, sw.to, e); foot.lift = Math.sin(Math.PI * u) * sw.h;
+      foot.psi = u < .3 ? lerp(num.toeOff, .15, u / .3) : lerp(.15, num.strike, (u - .3) / .7);
+      foot.u = u;
+      if (u >= 1){ foot.sw = null; foot.planted = true; foot.lift = 0; foot.landT = 0; prints.push({ x: foot.x, dir: P.dir, t: 0, far: which === 'far' }); if (prints.length > 40) prints.shift(); }
+    } else {
+      foot.landT = (foot.landT || 0) + dt;
+      // in stance: heel strike -> flat -> heel rises onto the toes before lift-off
+      const G = GAITS[P.gait], win = P.state === 'moving' ? inWindows(G[which], P.ph) : null;
+      const p = win ? ((P.ph - win.s) % 1 + 1) % 1 / win.len : 0.5;
+      if (num.tiptoe > 0.5 || GAITS[P.gait].tiptoe) foot.psi = .42;
+      else foot.psi = p < .15 ? lerp(num.strike, 0, p / .15) : p > .7 ? lerp(0, num.toeOff, (p - .7) / .3) : 0;
+      foot.stanceP = p;
+    }
+  }
+}
+function resetPhase(){ P.ph = 0; P.gait = P.next; feet.near.prevStance = true; feet.far.prevStance = !!inWindows(GAITS[P.gait].far, 0); }
+
+// hip height: standing height for the gait, a pendulum rise over each stance (walk),
+// a dip under load (run/skip) and a flight arc whenever both feet are off the ground.
+function hipHeight(){
+  let y = HIP_REST * num.hip;
+  if (P.state === 'moving'){
+    const G = GAITS[P.gait];
+    for (const which of ['near', 'far']){ const f = feet[which]; if (f.planted && f.stanceP != null){ y -= num.pend * Math.sin(Math.PI * f.stanceP); y += num.dip * Math.sin(Math.PI * f.stanceP); } }
+    for (const fl of G.flights){ const d = ((P.ph - fl.s) % 1 + 1) % 1; if (d < fl.len) y -= num.air * Math.sin(Math.PI * d / fl.len); }
+  } else y = lerp(y, HIP_REST * 0.985, 0.5);
+  // never ask a planted leg to reach further than it can
+  for (const which of ['near', 'far']){
+    const f = feet[which], ay = -ANK - f.lift - (f.psi > 0 ? Math.sin(f.psi) * 20 : 0), dx = (f.x - P.hipX);
+    const reach = L1 + L2 - 1.5, need = ay - Math.sqrt(Math.max(0, reach * reach - dx * dx)) - 4;
+    if (y < need) y = need;
+  }
+  return y;
+}
+// two-bone IK in local space (facing +x, y down). Returns canvas rotations for thigh and shin.
+function ik(tx, ty){
+  const d = clamp(Math.hypot(tx, ty), 8, L1 + L2 - 0.01);
+  const base = Math.atan2(tx, ty);                                 // angle of the target from straight down, + = forward
+  const A = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  const B = Math.acos(clamp((L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2), -1, 1));
+  return { thigh: -(base + A), shin: Math.PI - B, fwd: base + A };  // knee in front, shin folds back
+}
+
+// ---------------- springs for follow-through ----------------
+const spring = (k, c) => ({ x: 0, v: 0, step(dt, drive){ this.v += (-k * this.x - c * this.v + drive) * dt; this.x += this.v * dt; } });
+const SP = { pom: spring(70, 6), ear: spring(55, 4), scarf: spring(30, 5), pack: spring(120, 9), hh: spring(90, 6), skirt: spring(80, 9), head: spring(60, 10) };
+let prevHipY = HIP_REST, prevVy = 0, prevV = 0;
+
+// ---------------- input ----------------
+let showRig = false, giggle = 0, blinkT = 0;
+document.querySelectorAll('[data-gait]').forEach(b => b.onclick = () => {
+  P.next = b.dataset.gait; if (P.state !== 'moving') P.gait = P.next;
+  P.wantMove = true; if (P.state === 'idle'){ P.state = 'moving'; resetPhase(); }
+  document.querySelectorAll('[data-gait]').forEach(o => o.classList.toggle('on', o === b));
+});
+document.getElementById('stop').onclick = () => { P.wantMove = false; if (P.state === 'moving') P.state = 'settling'; };
+document.getElementById('rig').onclick = e => { showRig = !showRig; e.target.classList.toggle('on', showRig); };
+let camX = 0;
+const toScreenX = x => (x - camX) * K + W / 2;
+cv.addEventListener('pointerdown', e => {
+  const x = e.clientX * DPR, y = e.clientY * DPR, hx = toScreenX(P.hipX), hy = GROUND + P.hipY * K;
+  if (Math.abs(x - hx) < 110 * K && y > hy - 420 * K && y < GROUND + 10 * K){ giggle = 1.4; SP.head.v += 3; return; }   // tap her: giggle
+  const d = x < hx ? -1 : 1;                                       // tap left/right of her: walk that way
+  P.wantDir = d; P.wantMove = true;
+  if (d !== P.dir){ if (P.state === 'moving') P.state = 'settling'; else if (P.state === 'idle'){ P.state = 'turning'; P.flipT = 0; } }
+  else if (P.state === 'idle'){ P.state = 'moving'; resetPhase(); }
+});
+
+// ---------------- scenery ----------------
+function propsIn(layer, x0, x1, spacing, kinds, seedK){
+  const out = [];
+  for (let i = Math.floor(x0 / spacing) - 1; i <= Math.ceil(x1 / spacing) + 1; i++){
+    const r = h3(i, seedK, 3); if (r < 0.25) continue;
+    out.push({ x: i * spacing + (h3(i, seedK, 4) - .5) * spacing * .6, kind: kinds[Math.floor(h3(i, seedK, 5) * kinds.length)], sc: .75 + h3(i, seedK, 6) * .5 });
+  }
+  return out;
+}
+function drawProp(kind, sx, sy, scale){
+  const p = propImg[kind]; const [bx, by, bw, bh] = p.box;
+  ctx.drawImage(p.cv, sx + bx * scale, sy + by * scale, bw * scale, bh * scale);
+}
+function hills(par, baseY, amp, col, seedK){
+  const off = camX * par * K;
+  ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 6 * DPR){ const wx = (x + off) / (K * 120); ctx.lineTo(x, baseY - amp * (0.55 + 0.3 * Math.sin(wx + seedK) + 0.15 * Math.sin(wx * 2.7 + seedK * 2))); }
+  ctx.lineTo(W, H); ctx.fill();
+}
+
+// ================= frame =================
+let last = performance.now(), T = 0;
+const draw = (name, a = 1) => { const p = parts[name]; if (!p) return; if (a !== 1) ctx.globalAlpha = a; ctx.drawImage(p.cv, p.x, p.y, p.w, p.h); if (a !== 1) ctx.globalAlpha = 1; };
+const about = (x, y, fn) => { ctx.translate(x, y); fn(); ctx.translate(-x, -y); };
+function frame(now){
+  if (cv.width !== Math.floor(innerWidth * Math.min(2, devicePixelRatio || 1)) || cv.height !== Math.floor(innerHeight * Math.min(2, devicePixelRatio || 1))) layout();
+  const dt = Math.min(0.04, Math.max(0, (now - last) / 1000)); last = now; T += dt;
+  stepGait(dt);
+  const hipYt = hipHeight();
+  P.hipY = lerp(P.hipY, hipYt, Math.min(1, dt * 18));
+  const vy = (P.hipY - prevHipY) / Math.max(dt, 1e-3), ay = (vy - prevVy) / Math.max(dt, 1e-3); prevHipY = P.hipY; prevVy = vy;
+  const ax = (P.v - prevV) / Math.max(dt, 1e-3); prevV = P.v;
+  P.lean = lerp(P.lean, P.state === 'moving' ? num.lean * Math.min(1, P.v / (num.L * num.f)) : 0, Math.min(1, dt * 4));
+  // follow-through: things that hang off her lag behind the hip's bounce and her speed
+  const d = clamp(dt, 0, 0.04);
+  SP.pom.step(d, -ay * 0.0035 - ax * 0.002); SP.ear.step(d, -ay * 0.004); SP.pack.step(d, ay * 0.06); SP.hh.step(d, ay * 0.09);
+  SP.scarf.step(d, -ax * 0.004 + Math.sin(T * 9) * P.v * 0.0015); SP.skirt.step(d, -ax * 0.003 - ay * 0.0015); SP.head.step(d, ay * 0.0006);
+  // camera leads her a little; the velocity term cancels the lerp's lag so fast gaits stay on screen
+  camX = lerp(camX, P.hipX + P.dir * (W * 0.1 / K + P.v / 3), Math.min(1, dt * 3));
+  giggle = Math.max(0, giggle - dt); blinkT = (blinkT + dt) % 3.4;
+
+  // ---- background ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, GROUND); sky.addColorStop(0, '#f6eedd'); sky.addColorStop(1, '#f1e3c6');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  hills(0.15, GROUND - 120 * K, 140 * K, '#bcd9c4', 1);
+  hills(0.3, GROUND - 40 * K, 120 * K, '#9fc79b', 4);
+  for (const p of propsIn(0, camX * 0.55 - W / K, camX * 0.55 + W / K, 260, ['tree', 'pine', 'tree'], 1)) drawProp(p.kind, (p.x - camX * 0.55) * K + W / 2, GROUND - 30 * K, K * 0.5 * p.sc);
+  ctx.fillStyle = '#8fbf6a'; ctx.fillRect(0, GROUND - 26 * K, W, H);
+  for (const p of propsIn(1, camX * 0.8 - W / K, camX * 0.8 + W / K, 220, ['bush', 'tree', 'pine', 'bush'], 2)) drawProp(p.kind, (p.x - camX * 0.8) * K + W / 2, GROUND - 14 * K, K * 0.72 * p.sc);
+  // the path she walks on
+  ctx.fillStyle = '#e8d3a6'; ctx.fillRect(0, GROUND - 6 * K, W, 34 * K);
+  ctx.fillStyle = '#d9c08c'; ctx.fillRect(0, GROUND + 26 * K, W, 4 * K);
+  for (const p of propsIn(2, camX - W / K, camX + W / K, 90, ['flowers', 'mushroom', 'tuft', 'flowers'], 3)) drawProp(p.kind, toScreenX(p.x), GROUND - 6 * K, K * 0.8 * p.sc);
+  // footprints: they stay exactly where each foot was planted, which is the proof that nothing slides
+  for (const pr of prints){
+    pr.t += dt; const a = Math.max(0, 1 - pr.t / 7) * 0.35; if (a <= 0) continue;
+    const x = toScreenX(pr.x + pr.dir * 12);
+    ctx.fillStyle = `rgba(150,110,70,${a})`; ctx.beginPath(); ctx.ellipse(x, GROUND + (pr.far ? -2 : 10) * K, 24 * K, 5 * K, 0, 0, 7); ctx.fill();
+  }
+  // soft shadow under her
+  ctx.fillStyle = 'rgba(80,60,40,.18)'; ctx.beginPath(); ctx.ellipse(toScreenX(P.hipX), GROUND + 6 * K, 70 * K * (1 + (P.hipY - HIP_REST) / 300), 9 * K, 0, 0, 7); ctx.fill();
+
+  // ---- the puppet ----
+  const hx = toScreenX(P.hipX), hy = GROUND + P.hipY * K;
+  ctx.setTransform(K * P.flip * P.dir, 0, 0, K, hx, hy);
+  // the card flip shows its edge: squash brightness a touch while edge-on
+  const legs = {};
+  for (const which of ['far', 'near']){
+    const f = feet[which];
+    const lx = (f.x - P.hipX) * P.dir, ly = -ANK - f.lift - (f.psi > 0 ? Math.sin(f.psi) * 22 : 0) - (GAITS[P.gait].tiptoe && f.planted ? 10 : 0) - P.hipY;
+    legs[which] = { ...ik(lx, ly - 4), lx, ly, psi: f.psi };
+  }
+  const drawLeg = (which, th, sh, bo) => {
+    const L = legs[which];
+    ctx.save();
+    if (which === 'far') ctx.translate(-5, -2);
+    about(0, 4, () => ctx.rotate(L.thigh)); draw(th);
+    about(0, 76, () => ctx.rotate(L.shin)); draw(sh);
+    about(0, 146, () => ctx.rotate(L.psi - (L.thigh + L.shin))); draw(bo);
+    ctx.restore();
+  };
+  // arms swing opposite to the legs: each arm copies the other side's thigh swing
+  const armFwd = (which) => { const other = legs[which === 'near' ? 'far' : 'near']; return clamp(other.fwd * num.arm, -1.2, 1.4) + num.armBias; };
+  const drawArm = (which, up, lo) => {
+    const a = armFwd(which), elb = num.elbow + Math.max(0, a) * num.elbowK;
+    ctx.save(); if (which === 'far') ctx.translate(6, -2);
+    about(0, -112, () => ctx.rotate(-a)); draw(up);
+    about(0, -54, () => ctx.rotate(-elb)); draw(lo);
+    ctx.restore();
+  };
+  const torso = () => about(0, 8, () => ctx.rotate(P.lean + Math.sin(P.ph * Math.PI * 4) * 0.012 * (P.state === 'moving' ? 1 : 0)));
+  // far limbs first
+  ctx.save(); torso(); drawArm('far', 'armUF', 'armLF'); ctx.restore();
+  drawLeg('far', 'thighF', 'shinF', 'bootF');
+  // body group
+  ctx.save(); torso();
+  const headRot = -P.lean * 0.55 + SP.head.x * 0.4 + (giggle > 0 ? Math.sin(T * 18) * 0.04 : 0) + Math.sin(T * 0.8) * 0.015;
+  const headXf = () => about(0, -140, () => ctx.rotate(headRot));
+  ctx.save(); headXf(); draw('hair'); ctx.restore();
+  ctx.save(); about(-62, -114, () => ctx.rotate(SP.pack.x * 0.02)); ctx.translate(0, SP.pack.x * 0.6);
+  ctx.save(); about(-70, -112, () => ctx.rotate(SP.hh.x * 0.03 - P.v * 0.0006)); ctx.translate(0, SP.hh.x * 0.5); draw('hh'); ctx.restore();
+  draw('pack'); ctx.restore();
+  ctx.save(); about(-34, -138, () => ctx.rotate(clamp(P.v * 0.0016 + SP.scarf.x * 0.05, -0.3, 1.1))); draw('scarfTail'); ctx.restore();
+  ctx.restore();
+  drawLeg('near', 'thighN', 'shinN', 'bootN');
+  ctx.save(); torso();
+  ctx.save(); about(0, 8, () => ctx.rotate(SP.skirt.x * 0.04 - P.lean * 0.6)); draw('skirt'); ctx.restore();
+  draw('sweater');
+  ctx.save(); headXf();
+  draw('face');
+  const moving = P.state === 'moving', mood = moving ? GAITS[P.gait].mood : 'idle';
+  const eyesOpen = (moving || giggle > 1.1) && !(blinkT > 3.25);
+  draw(eyesOpen ? 'eyesO' : 'eyesC');
+  ctx.save(); ctx.translate(0, mood === 'o' ? -4 : giggle > 0 ? -3 : 0); draw('brow'); ctx.restore();
+  if (giggle > 0 || mood === 'grin'){ ctx.save(); about(80, -192, () => ctx.scale(1, 1 + Math.abs(Math.sin(T * (giggle > 0 ? 20 : 6))) * 0.15)); draw('mouthO'); ctx.restore(); }
+  else if (mood === 'o'){ ctx.save(); about(80, -192, () => ctx.scale(0.5, 0.75)); draw('mouthO'); ctx.restore(); }
+  else draw('mouth');
+  draw('bangs');
+  ctx.save(); about(-14, -206, () => ctx.rotate(SP.ear.x * 0.06 + P.lean)); draw('earring'); ctx.restore();
+  draw('beanie');
+  ctx.save(); about(10, -342, () => ctx.rotate(SP.pom.x * 0.05 - P.v * 0.0004)); draw('pom'); ctx.restore();
+  ctx.restore();   // head
+  drawArm('near', 'armUN', 'armLN');
+  ctx.restore();   // torso
+
+  // ---- rig overlay: bones, IK targets, planted feet ----
+  if (showRig){
+    ctx.lineWidth = 3; ctx.font = 'bold 16px system-ui';
+    for (const which of ['far', 'near']){
+      const L = legs[which], kx = -Math.sin(L.thigh) * 72, ky = 4 + Math.cos(L.thigh) * 72;
+      ctx.strokeStyle = which === 'near' ? 'rgba(43,154,140,.95)' : 'rgba(43,154,140,.5)';
+      ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(kx, ky); ctx.lineTo(L.lx, L.ly); ctx.stroke();
+      ctx.fillStyle = feet[which].planted ? '#e5664a' : '#e8b04a';
+      ctx.beginPath(); ctx.arc(L.lx, L.ly, 7, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = '#2b9a8c'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, 7); ctx.fill();
+  }
+
+  // ---- footfall chart: last 3 s, stance = filled bar ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const hist = feet.near.hist; feet.near.hist.push([T, feet.near.planted]); feet.far.hist.push([T, feet.far.planted]);
+  for (const f of [feet.near, feet.far]) while (f.hist.length && T - f.hist[0][0] > 3) f.hist.shift();
+  const px = W * 0.06, pw = W * 0.88, py = GROUND + 40 * K, ph = Math.min(H - py - 12 * DPR, 120 * DPR);
+  if (ph > 50 * DPR){
+    ctx.fillStyle = 'rgba(255,250,240,.88)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, 14 * DPR) : ctx.rect(px, py, pw, ph); ctx.fill();
+    const G = GAITS[P.gait], fs = 12 * DPR, rowH = ph * 0.2, x0 = px + 70 * DPR, cw = pw - 84 * DPR;
+    ctx.fillStyle = '#3b2a2a'; ctx.font = `700 ${fs}px system-ui`;
+    const contacts = G.near.length + G.far.length;
+    ctx.fillText(`${P.state === 'moving' ? P.gait[0].toUpperCase() + P.gait.slice(1) : P.state === 'idle' ? 'Standing' : 'Stopping'} · duty ${Math.round(G.near.reduce((a, w) => a + w.len, 0) * 100)}% · ${Math.round(contacts * G.f * 60)} contacts/min · ${G.flights.length ? 'has flight' : 'always grounded'}`, px + 12 * DPR, py + 20 * DPR);
+    const rows = [['near', feet.near, '#2b9a8c'], ['far', feet.far, '#7fb8b0']];
+    rows.forEach(([lab, f, col], r) => {
+      const y = py + 32 * DPR + r * (rowH + 8 * DPR);
+      ctx.fillStyle = '#3b2a2a'; ctx.font = `600 ${fs * .9}px system-ui`; ctx.fillText(lab + ' foot', px + 12 * DPR, y + rowH * .7);
+      ctx.fillStyle = 'rgba(59,42,42,.08)'; ctx.fillRect(x0, y, cw, rowH);
+      ctx.fillStyle = col;
+      for (let i = 1; i < f.hist.length; i++) if (f.hist[i][1]){ const xa = x0 + cw * (1 - (T - f.hist[i - 1][0]) / 3), xb = x0 + cw * (1 - (T - f.hist[i][0]) / 3); ctx.fillRect(xa, y, xb - xa + .6, rowH); }
+    });
+    // airborne row
+    const y = py + 32 * DPR + 2 * (rowH + 8 * DPR);
+    ctx.fillStyle = '#3b2a2a'; ctx.fillText('airborne', px + 12 * DPR, y + rowH * .7);
+    ctx.fillStyle = '#e8b04a';
+    for (let i = 1; i < feet.near.hist.length && i < feet.far.hist.length; i++) if (!feet.near.hist[i][1] && !feet.far.hist[i][1]){ const xa = x0 + cw * (1 - (T - feet.near.hist[i - 1][0]) / 3), xb = x0 + cw * (1 - (T - feet.near.hist[i][0]) / 3); ctx.fillRect(xa, y, xb - xa + .6, rowH); }
+  }
+
+  // paper grain
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = .2; ctx.fillStyle = grainPat; ctx.fillRect(0, 0, W / DPR, H / DPR);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__test = { state: () => ({ state: P.state, gait: P.gait, dir: P.dir, hipX: P.hipX, near: feet.near.x, far: feet.far.x, nearPlanted: feet.near.planted, farPlanted: feet.far.planted }),
+  gait: (g) => document.querySelector(`[data-gait="${g}"]`).click(), stop: () => document.getElementById('stop').click(),
+  go: (d) => cv.dispatchEvent(new PointerEvent('pointerdown', { clientX: d > 0 ? innerWidth - 5 : 5, clientY: innerHeight * 0.3 })) };
+})();
+</script>
+</body>
+</html>

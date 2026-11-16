@@ -167,6 +167,47 @@ The bake scale is about the display scale (`min(2.4, fit.k × 1.05)`), so bitmap
 
 **Opinion:** this is the stage-mode puppet technique. It's the `twilight-bugle` rig (pivots, attach points, hierarchy) with parts generated from code instead of painted by an image model.
 
+### 5.1 Procedural gaits (side-view walker)
+
+**Prototype:** `07-gait-walker.html`. The same character redrawn in profile with full body (striped tights, boots, a backpack with the hedgehog peeking out), split into jointed parts and baked the same way. Walk, run, skip and sneak, with stop, card-flip turns, footprints, a parallax painted landscape and a live footfall chart.
+
+**A gait is data:** stance windows per foot in cycle phase, plus body parameters.
+
+| Gait | Stance windows (near / far) | Duty | Flight | Notes |
+|---|---|---|---|---|
+| walk | `[0, .62)` / `[.5, 1.12)` | 62% | none | pendulum hip rise mid-stance, heel strike then toe-off |
+| run | `[0, .36)` / `[.5, .86)` | 36% | 2 per cycle | hip dips under load, flight arc, forefoot strike, lean 0.2, elbows bent |
+| skip | `[0, .17)`, `[.25, .40)` / `[.5, .67)`, `[.75, .90)` | 32% | 4 per cycle | step-hop: two contacts per foot, big arm swing |
+| sneak | `[0, .74)` / `[.5, 1.24)` | 74% | none | crouched hip (0.86), tiptoe stance, high steps, hands up |
+
+Airborne windows are computed from the pattern (sampled at 400 steps), not written by hand.
+
+**Feet never slide.** Measured: **0.000 units** of planted-foot drift across all four gaits.
+- A foot lifts on the stance → swing **edge** of its pattern. At lift-off it aims for where the hip will be at the middle of its next stance: `hipX + dir · v · (tToMidStance) + 4`.
+- A swing is a **timer** (duration = phase to next stance ÷ cadence). The timer decides landing, not the pattern, so a gait change mid-swing never pops a foot into the ground.
+- Short swings (skip hops) lift less: × 0.45 when less than 0.12 of the cycle away.
+- Gait windows switch only at the cycle boundary, while numeric parameters blend continuously (about 0.2 s).
+
+**Body:**
+- **Hip height** = standing height × gait crouch, − a pendulum rise over each stance, + a dip under load, − a flight arc. It is then clamped so no planted leg is asked to reach beyond `L1 + L2`.
+- **Legs:** two-bone IK in local space (facing +x), knee forward: `thigh = −(base + A)`, `shin = π − B`, with `base = atan2(tx, ty)`. The boot's world pitch ψ follows a heel-strike → flat → toe-roll curve in stance and toe-off → strike in swing, and the ankle rises with ψ.
+- **Arms copy the opposite thigh's swing** (× gain + bias), so they work for any pattern, skip included. Elbow bend grows on the forward swing.
+- **Follow-through springs** driven by the hip's vertical acceleration and the horizontal speed change: pom-pom, earring, scarf tail (also streams back with speed), backpack, hedgehog, skirt and a head nod.
+- **Expressions per gait:** eyes open while moving, a grin for run and skip, an "o" for sneak, contented closed eyes when standing.
+
+**Stopping and turning:**
+- **Stop:** the hip coasts (`v *= e^(−7 dt)`), then each foot steps to a neutral spot under the hip, one at a time, before going idle.
+- **Turn:** settle, then a card flip where `scaleX = |cos(π t)|` over 0.4 s. Facing switches while edge-on, and the feet are re-placed at their mirrored neutral spots.
+- **Camera:** it leads in the facing direction, plus a `v / rate` term that cancels the lerp lag, so the run stays on screen.
+
+**Footfall chart:** the last 3 s of stance per foot plus an airborne row (a Hildebrand-style gait diagram), recorded every frame from the real foot state, not from the pattern. So it shows transitions honestly.
+
+**Next steps:**
+- A drawn edge-on frame for the flip (a thin card edge).
+- An uneven ground height function in the IK target.
+- Gait from a speed slider (automatic walk → run transition at a Froude-number threshold).
+- The hedgehog walking on its own with a 4-beat quadruped pattern.
+
 ## 6. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.

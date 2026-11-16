@@ -10,5 +10,6 @@ Experiments for a storybook game where every asset (world, characters, light, mu
 | `prototypes/04-gouache-svg-illustration.html` | A gouache-style illustration from SVG shapes and filters |
 | `prototypes/05-painted-diorama.html` | Painted voxel diorama: walking, wading, ripples, grass and wind, sun and lamp shadows, puppet dialogue |
 | `prototypes/06-baked-svg-puppet.html` | The gouache drawing as an animated puppet: baked SVG parts on a canvas rig, springs, expressions, taps |
+| `prototypes/07-gait-walker.html` | The character in profile with procedural gaits (walk, run, skip, sneak): planted feet, IK legs, footfall chart |
 
 Open any file in a browser. The findings are in `code-first-techniques.md`.
