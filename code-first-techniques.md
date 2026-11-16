@@ -132,7 +132,101 @@ Real devices with GPU canvas should be much faster. These numbers are only for c
 
 ---
 
-## 5. Decisions so far
+## 5. Baked SVG puppet rig (animating the gouache drawing)
+
+**Prototype:** `06-baked-svg-puppet.html` ("The Night Reader" from §3, animated).
+
+**Why bake:** moving the live SVG would re-run every filter (displacement, turbulence, blur) on every frame, and phones can't keep up. Instead, each part goes through its filters **once**, and the animation moves the resulting bitmaps on a canvas rig. Measured: **43 parts baked in about 0.3 s, then 60 fps** (headless Chromium, no GPU).
+
+**Baking one part:**
+1. In the source SVG, every part is a top-level `<g data-part="name">`. The source SVG stays in the DOM, hidden with `visibility: hidden` (not `display: none`, because `getBBox()` needs layout).
+2. `getBBox()` the part and add a margin for filter overspill (14 units; 30 for the fuzz and blur filters).
+3. Clone the whole SVG. Remove every other `[data-part]`. Set `viewBox` to the part's box and `width`/`height` to box × bake scale. Defs, patterns, clip paths and filters come along, and filter noise stays identical because it lives in user space.
+4. Serialise it to a `data:image/svg+xml` URL, call `Image.decode()`, then draw it into a canvas sized to the box. Store `{ canvas, x, y, w, h }` in drawing units.
+5. Bake 6 parts at a time.
+
+The bake scale is about the display scale (`min(2.4, fit.k × 1.05)`), so bitmaps match screen pixels.
+
+**Authoring rules the drawing must follow:**
+- **Split by motion, not by look.** Anything that moves on its own is its own part: earrings, pom-pom, each steam wisp, each motif, the hedgehog's body, and the hedgehog's eye in each state.
+- **States are sibling parts.** `eyesClosed` / `eyesOpen`, `mouth` / `mouthOpen`, `hhEyeClosed` / `hhEyeOpen`. Draw the extra states up front, even though the still image never shows them.
+- **Draw order ≠ hierarchy.** The hair sits behind the torso but moves with the head. Draw it first, inside the head transform, then draw the torso, then the rest of the head.
+- **Pivots in drawing units:** body (400, 1000) at the bottom edge; head (400, 505) at the neck; pom-pom at its base; earrings at the lobe; hedgehog at its feet.
+
+**Motion:**
+- **Breathing:** scale the body about its bottom edge, `1 + b` vertically and `1 − 0.35 b` horizontally, so volume is roughly kept.
+- **Head:** slow sway plus a tap wobble spring.
+- **Secondary motion:** damped springs (`a = −k·x − c·v + drive`) for the pom-pom, earrings and hair, driven by the head's angular acceleration. They lag and overshoot like real hanging things.
+- **Expression state machine:** eyes are content (closed) by default. Every 4–8 s she opens them, glances toward the hedgehog and blinks, and the hedgehog wakes and peeks back about 0.35 s later. A tap gives surprise (0.35 s) → giggle (open mouth with jaw flutter, blush boost, head wobble, hearts).
+- **Steam:** each wisp rises, sways and fades along a loop. Two copies half a cycle apart keep it continuous.
+- **Hit testing:** invert the page fit into drawing units, then use circles and rectangles per hotspot.
+
+**Pitfalls:**
+- Put `addEventListener('error')` in its own `<script>` before the main one. A syntax error in the main script stops that same script from registering its own error handler, and the page just sits on "loading".
+- Not yet tested on Safari. Rendering an SVG data URL with filters into `Image` should work there, but confirm it.
+
+**Opinion:** this is the stage-mode puppet technique. It's the `twilight-bugle` rig (pivots, attach points, hierarchy) with parts generated from code instead of painted by an image model.
+
+### 5.1 Procedural gaits (side-view walker)
+
+**Prototype:** `07-gait-walker.html`. The same character redrawn in profile with full body (striped tights, boots, a backpack with the hedgehog peeking out), split into jointed parts and baked the same way. Walk, run, skip and sneak, with stop, card-flip turns, footprints, a parallax painted landscape and a live footfall chart.
+
+**A gait is data:** stance windows per foot in cycle phase, plus body parameters.
+
+| Gait | Stance windows (near / far) | Duty | Flight | Notes |
+|---|---|---|---|---|
+| walk | `[0, .62)` / `[.5, 1.12)` | 62% | none | pendulum hip rise mid-stance, heel strike then toe-off |
+| run | `[0, .36)` / `[.5, .86)` | 36% | 2 per cycle | hip dips under load, flight arc, forefoot strike, lean 0.2, elbows bent |
+| skip | `[0, .17)`, `[.25, .40)` / `[.5, .67)`, `[.75, .90)` | 32% | 4 per cycle | step-hop: two contacts per foot, big arm swing |
+| sneak | `[0, .74)` / `[.5, 1.24)` | 74% | none | crouched hip (0.86), tiptoe stance, high steps, hands up |
+
+Airborne windows are computed from the pattern (sampled at 400 steps), not written by hand.
+
+**Feet never slide.** Measured: **0.000 units** of planted-foot drift across all four gaits.
+- A foot lifts on the stance → swing **edge** of its pattern. At lift-off it aims for where the hip will be at the middle of its next stance: `hipX + dir · v · (tToMidStance) + 4`.
+- A swing is a **timer** (duration = phase to next stance ÷ cadence). The timer decides landing, not the pattern, so a gait change mid-swing never pops a foot into the ground.
+- Short swings (skip hops) lift less: × 0.45 when less than 0.12 of the cycle away.
+- Gait windows switch only at the cycle boundary, while numeric parameters blend continuously (about 0.2 s).
+
+**Body:**
+- **Hip height** = standing height × gait crouch, − a pendulum rise over each stance, + a dip under load, − a flight arc. It is then clamped so no planted leg is asked to reach beyond `L1 + L2`.
+- **Legs:** two-bone IK in local space (facing +x), knee forward: `thigh = −(base + A)`, `shin = π − B`, with `base = atan2(tx, ty)`. The boot's world pitch ψ follows a heel-strike → flat → toe-roll curve in stance and toe-off → strike in swing, and the ankle rises with ψ.
+- **Arms copy the opposite thigh's swing** (× gain + bias), so they work for any pattern, skip included. Elbow bend grows on the forward swing.
+- **Follow-through springs** driven by the hip's vertical acceleration and the horizontal speed change: pom-pom, earring, scarf tail (also streams back with speed), backpack, hedgehog, skirt and a head nod.
+- **Expressions per gait:** eyes open while moving, a grin for run and skip, an "o" for sneak, contented closed eyes when standing.
+
+**Stopping and turning:**
+- **Stop:** the hip coasts (`v *= e^(−7 dt)`), then each foot steps to a neutral spot under the hip, one at a time, before going idle.
+- **Turn:** settle, then a card flip where `scaleX = |cos(π t)|` over 0.4 s. Facing switches while edge-on, and the feet are re-placed at their mirrored neutral spots.
+- **Camera:** it leads in the facing direction, plus a `v / rate` term that cancels the lerp lag, so the run stays on screen.
+
+**Footfall chart:** the last 3 s of stance per foot plus an airborne row (a Hildebrand-style gait diagram), recorded every frame from the real foot state, not from the pattern. So it shows transitions honestly.
+
+**Speed slider → automatic gait (Froude number):**
+- `Fr = v² / (g · legLength)`. With a child's 164-unit leg ≈ 0.6 m, `g ≈ 2680 units/s²`.
+- **Hysteresis:** run above Fr 0.42, back to walk below 0.32, so the gait never flickers at the boundary.
+- In auto mode, cadence scales with `√(v / v₀)` and stride = `v / cadence`.
+- Measured: walk at 120, 200 and 300 u/s (Fr 0.03–0.20), run at 520 u/s (Fr 0.62). **0.000** planted-foot drift at every speed.
+- Speed below 12 stops her (settle → idle). A tap restarts at 160 u/s.
+
+**Card edge on turning:** while `|scaleX| < 0.35`, draw a paper strip (corrugated edge) the height of the puppet at the hip, fading in as she goes edge-on.
+
+**Pip, the quadruped:** it hops out of the backpack (parabola with a spin), follows 95 units behind her, and hops back in on request. Same machinery as hers (stance windows, edge-triggered timed swings, plants aimed at mid-stance), with four legs:
+
+| Gait | Footfall offsets (nh, nf, fh, ff) | Duty | Used when |
+|---|---|---|---|
+| walk (lateral sequence) | 0, .25, .5, .75 | 72% | speed < 90 |
+| trot (diagonal pairs) | nf + fh at 0, ff + nh at .5 | 42% | < 240 |
+| gallop | fronts 0 / .08, hinds .48 / .56 | 26% | above |
+
+- Legs are drawn as short curved strokes from the shoulder or hip attachment to the planted paw. At this size they need no IK.
+- Standing still: any paw more than 6 units from home shuffles back.
+- Measured: **0.000** paw drift in trot and gallop.
+- Pip's four feet join the footfall chart, so you can see the diagonal pairing of the trot directly.
+
+**Next steps:** an uneven ground height in both IK targets; Pip walking (not trotting) at slow speeds (raise its thresholds or shorten its stride); sounds per footfall from the musikmodel synth (the chart already knows every contact).
+
+## 6. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
 - **Everything is `(generator, params, seed)` → a baked bitmap or atlas, cached.** Generate once, play many times.
@@ -144,7 +238,7 @@ Real devices with GPU canvas should be much faster. These numbers are only for c
 - **Kids:** read-aloud with word highlighting, big tap targets, autosave, no timers, no fail states (wrong choices get a funny reaction), no accounts, no analytics, no network during play.
 - **The only asset that is not code-first:** voice acting.
 
-## 6. Open questions
+## 7. Open questions
 
 1. Should the dialogue card stay a 2D overlay, or should puppets pop out of the diorama as Twilight Bugle-style cardboard (Three.js `ExtrudeGeometry` from the SVG paths, with SVG rendered to a texture)?
 2. Should map characters get a thin ink outline for readability?
