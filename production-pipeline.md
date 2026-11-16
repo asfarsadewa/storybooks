@@ -369,8 +369,9 @@ Test M1 on the iPhone in its first week. Safari SVG baking is the biggest risk t
 
 Both scenes pass the definition of done (§10) in every scenario the story uses. They are lighter than the reference meadow.
 
+**A full play on the iPhone 14 Pro** (the author, 2026-11-16): music, voices, the stage card and the puppets over the diorama. No problems were found.
+
 **Open:**
-1. A full play on the phone: music, the stage card and the puppets over the diorama. No bench covers these together yet.
-2. The kid has no outline (§4.8 of the findings). The golden-hour refill is at 6% slow frames. Book one stages no scene at golden hour, and its lamp light has no shadows.
-3. Sound effects (`sfx`) are valid tags with no sounds yet.
-4. A low-cost tablet.
+1. The kid has no outline (§4.8 of the findings). The golden-hour refill is at 6% slow frames. Book one stages no scene at golden hour, and its lamp light has no shadows.
+2. Sound effects (`sfx`) are valid tags with no sounds yet.
+3. A low-cost tablet.
