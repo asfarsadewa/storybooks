@@ -371,7 +371,9 @@ Both scenes pass the definition of done (§10) in every scenario the story uses.
 
 **A full play on the iPhone 14 Pro** (the author, 2026-11-16): music, voices, the stage card and the puppets over the diorama. No problems were found.
 
+**Finished after the play:** clearer puzzle instructions (numbered steps for each engine, tune labels, a pick count), the house outline on Kai, 10 synthesized sound effects for the `sfx` tags, and the storybook UI (findings §7b). A third full autoplay passed. Across the three autoplays, every trust value, every mask choice and every ending played.
+
 **Open:**
-1. The kid has no outline (§4.8 of the findings). The golden-hour refill is at 6% slow frames. Book one stages no scene at golden hour, and its lamp light has no shadows.
-2. Sound effects (`sfx`) are valid tags with no sounds yet.
-3. A low-cost tablet.
+1. The golden-hour refill is at 4–10% slow frames. Book one stages no scene at golden hour.
+2. A low-cost tablet.
+3. The two other act-3 routes (echo horn, gravity boots) are not in book one.

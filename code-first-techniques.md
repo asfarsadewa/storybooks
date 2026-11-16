@@ -435,6 +435,18 @@ After a drag, caches refill in about 1.5 s, with one 0.5 s window averaging 65 m
 
 **Still slow, and the next lever: WebGL for explore mode.** Dragging is the one case caching can't fix in Canvas 2D: every stack must be redrawn at a new angle. Sprite stacking is the ideal GPU workload: all slices of all models in one texture atlas, every slice an **instanced quad in a single draw call**, the bend and squash in the vertex shader, and shadows as a second instanced pass with a projection matrix. That should make dragging as cheap as idle. Keep Canvas 2D or SVG for the puppet stage and UI.
 
+## 7b. Storybook UI from code (bubbles, captions, cards)
+
+**Built in:** `storybook-game/engine/paper.js`. The author said the first speech bubbles looked like generic web controls.
+
+- **Inked outlines in code.** Walk a rounded rectangle in steps of about 10 px. Nudge each point by smooth seeded noise (three sines with seeded phases), then join the points with quadratic curves through their midpoints. The edge looks hand-inked, and the same seed always draws the same edge. A second faint stroke, offset by about 1 px, gives a doubled-ink look.
+- **No image files.** The shape is an SVG string in a `data:` URL, set as the element's background at its exact pixel size. A `ResizeObserver` redraws it when the size changes, so the edge stays crisp. A paper grain is an `feTurbulence` filter inside that SVG, clipped to the shape (Safari applies filters in SVG images, §5).
+- **Speech tails.** The tail's root sits just inside the body edge. Its fill hides the body's ink there, and only its two sides are inked, so no line crosses the root. The tail points at the speaker: left or right of a two-puppet stage, or straight up.
+- **Narration** is a parchment caption with no tail and italic type. **Choices** are inked tags in light tints of the palette.
+- **Type without font files:** the system's book serif, `"Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif`. iPhones and iPads have Iowan Old Style. Speaker names use small caps.
+- **Pitfall:** `background: transparent !important` on a panel also removes the generated background image. Set `background-color` only.
+- **The stage needs no sheet.** Without the card, the puppets stand on the diorama like a pop-up theatre. The author kept that look.
+
 ## 8. Decisions so far
 
 - **Two modes, one world:** an explore mode (painted sprite-stack diorama) plus a stage mode (gouache SVG paper puppets for dialogue, choices and turn-based moments). Tapping a character transitions between them.
