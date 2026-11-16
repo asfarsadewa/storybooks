@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Sprite Stacking — Flight Demo</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d1b2a;overflow:hidden;font-family:ui-monospace,Menlo,Consolas,monospace;color:#e8eef5;-webkit-user-select:none;user-select:none;touch-action:none}
+  canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated}
+  #hud{position:fixed;left:10px;top:10px;font-size:11px;line-height:1.5;background:rgba(10,20,35,.6);padding:6px 9px;border-radius:8px;pointer-events:none;max-width:60vw}
+  #hud b{color:#ffd166}
+  #panel{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);background:rgba(10,20,35,.78);border-radius:12px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:center;font-size:12px;max-width:calc(100vw - 24px);box-sizing:border-box}
+  #panel label{display:flex;align-items:center;gap:6px;white-space:nowrap}
+  input[type=range]{width:110px;accent-color:#ffd166}
+  input[type=checkbox]{accent-color:#ffd166;width:16px;height:16px}
+  button{background:#ffd166;color:#1b263b;border:0;border-radius:8px;padding:6px 10px;font:inherit;font-weight:bold}
+  @media (max-width:600px){#hint{display:none}#hud{max-width:calc(100vw - 40px)}}
+  #hint{position:fixed;right:10px;top:10px;font-size:11px;background:rgba(10,20,35,.6);padding:6px 9px;border-radius:8px;pointer-events:none;text-align:right}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <b>Sprite stacking</b>: every object is a pile of flat 2D slices, rotated together and drawn bottom-up, each nudged up the screen.<br>
+  <span id="stats"></span>
+</div>
+<div id="hint">Steer: ← → / A D<br>or hold left/right side</div>
+<div id="panel">
+  <label>Slice gap <input id="gap" type="range" min="1" max="14" step="0.5" value="3"><span id="gapv">3</span></label>
+  <label><input id="fill" type="checkbox" checked> Fill gaps</label>
+  <label><input id="follow" type="checkbox" checked> Camera follows heading</label>
+  <label><input id="auto" type="checkbox" checked> Autopilot</label>
+  <button id="explode">Explode slices</button>
+</div>
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let DPR = 1, Wpx = 0, Hpx = 0, S = 3;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  Wpx = Math.floor(innerWidth * DPR); Hpx = Math.floor(innerHeight * DPR);
+  cv.width = Wpx; cv.height = Hpx;
+  S = Math.max(2, Math.min(4, innerWidth / 130)) * DPR; // screen px per voxel
+}
+addEventListener('resize', resize); resize();
+
+// ---------- seeded RNG + tileable value noise ----------
+let seed = 1337;
+const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+function hash(x, y, s){ let h = (x * 374761393 + y * 668265263 + s * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y, P, s){ // tileable with period P
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const u = fx*fx*(3-2*fx), v = fy*fy*(3-2*fy);
+  const m = n => ((n % P) + P) % P;
+  const a = hash(m(xi), m(yi), s), b = hash(m(xi+1), m(yi), s), c = hash(m(xi), m(yi+1), s), d = hash(m(xi+1), m(yi+1), s);
+  return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v;
+}
+const WORLD = 512;
+function fbm(x, y, s){
+  let t = 0, amp = .5, norm = 0;
+  for (const P of [6, 12, 24, 48]) { t += amp * vnoise(x / WORLD * P, y / WORLD * P, P, s); norm += amp; amp *= .5; }
+  return t / norm;
+}
+
+// ---------- colour helpers ----------
+function hex(h){ return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+function shade(c, k){ return [Math.min(255, c[0]*k)|0, Math.min(255, c[1]*k)|0, Math.min(255, c[2]*k)|0]; }
+
+// ---------- model builder: fn(x,y,z) -> [r,g,b] | null ----------
+function buildModel(w, d, h, fn, opts = {}){
+  const layers = [];
+  let silhouette = null;
+  const sc = document.createElement('canvas'); sc.width = w; sc.height = d;
+  const sctx = sc.getContext('2d'); const sImg = sctx.createImageData(w, d);
+  for (let z = 0; z < h; z++){
+    const c = document.createElement('canvas'); c.width = w; c.height = d;
+    const g = c.getContext('2d'); const img = g.createImageData(w, d);
+    let any = false;
+    const ao = opts.flat ? 1 : 0.62 + 0.38 * (z / Math.max(1, h - 1)); // darker at the bottom = cheap AO
+    for (let y = 0; y < d; y++) for (let x = 0; x < w; x++){
+      const col = fn(x, y, z);
+      if (!col) continue;
+      any = true;
+      const cc = shade(col, ao), i = (y * w + x) * 4;
+      img.data[i] = cc[0]; img.data[i+1] = cc[1]; img.data[i+2] = cc[2]; img.data[i+3] = 255;
+      sImg.data[i+3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    layers.push(any ? c : null);
+  }
+  sctx.putImageData(sImg, 0, 0);
+  silhouette = sc;
+  return { w, d, h, layers, silhouette };
+}
+
+// ---------- models ----------
+const GREENS = ['#2d6a4f','#40916c','#1b4332','#52b788'].map(hex);
+const BARK = hex('#6b4226');
+function pine(variant){
+  const h = 13 + variant, r0 = 4.2;
+  return buildModel(9, 9, h, (x, y, z) => {
+    const dx = x - 4, dy = y - 4, dist = Math.hypot(dx, dy);
+    if (z < 3) return dist < 1 ? BARK : null;
+    const t = (z - 3) / (h - 3);
+    const r = r0 * (1 - t) + 0.4 + ((z % 3 === 0) ? 0.6 : 0); // layered tiers
+    if (dist > r) return null;
+    return GREENS[(hash(x, y + z * 9, variant) * 3.2) | 0];
+  });
+}
+function oak(variant){
+  return buildModel(11, 11, 11, (x, y, z) => {
+    const dx = x - 5, dy = y - 5;
+    if (z < 4) return Math.hypot(dx, dy) < 1.1 ? BARK : null;
+    const dz = (z - 7) * 1.25;
+    const dist = Math.hypot(dx, dy, dz) + hash(x, y + z * 11, 7 + variant) * 1.3;
+    if (dist > 5.4) return null;
+    return shade(GREENS[1 + ((hash(x * 3, y, z) * 2.4) | 0) % 3], 1.15);
+  });
+}
+const WALL = hex('#f1e3c8'), WALL2 = hex('#d9c7a6'), WIN = hex('#3a6ea5'), DOOR = hex('#5c3d2e');
+const ROOFS = ['#b23a48','#3d5a80','#7f5539','#6a4c93'].map(hex);
+function house(variant){
+  const roof = ROOFS[variant % ROOFS.length];
+  const w = 12, d = 9, h = 11;
+  return buildModel(w, d, h, (x, y, z) => {
+    const edge = x === 1 || x === w - 2 || y === 1 || y === d - 2;
+    const inside = x >= 1 && x <= w - 2 && y >= 1 && y <= d - 2;
+    if (z < 5){
+      if (!inside) return null;
+      if (z === 0) return WALL2;
+      if (edge){
+        if ((z === 2 || z === 3) && ((x % 3 === 0 && (y === 1 || y === d - 2)) || (y === 4 && (x === 1 || x === w - 2)))) return WIN;
+        if (z < 3 && x === 6 && y === d - 2) return DOOR;
+        return WALL;
+      }
+      return WALL;
+    }
+    // gable roof along x
+    const k = z - 5, half = (d - 1) / 2, dy = Math.abs(y - half);
+    if (dy <= half - k * 0.85 && x >= 0 && x <= w - 1){
+      if (variant % 2 && x === 9 && z <= 8 && dy < 1) return hex('#555555'); // chimney
+      return shade(roof, 0.85 + 0.15 * (dy < half - k * 0.85 - 1 ? 1 : 0.6));
+    }
+    return null;
+  });
+}
+const ROCK = hex('#8d99ae');
+function rock(variant){
+  return buildModel(7, 7, 4, (x, y, z) => {
+    const dist = Math.hypot(x - 3, y - 3, z * 1.6) + hash(x, y, variant + z) * 1.2;
+    return dist < 3.3 ? shade(ROCK, 0.85 + hash(y, x, z) * 0.3) : null;
+  });
+}
+const CLOUD = hex('#ffffff');
+function cloud(variant){
+  const w = 26, d = 18, h = 6;
+  const blobs = [];
+  for (let i = 0; i < 6; i++) blobs.push([5 + rnd() * 16, 5 + rnd() * 8, 2 + rnd() * 2, 3.5 + rnd() * 3]);
+  return buildModel(w, d, h, (x, y, z) => {
+    for (const [bx, by, bz, br] of blobs) if (Math.hypot(x - bx, y - by, (z - bz) * 1.6) < br) return shade(CLOUD, 0.9 + z * 0.02);
+    return null;
+  }, { flat: true });
+}
+// plane: forward = +x
+const BODY = hex('#f4f4f4'), RED = hex('#e63946'), GLASS = hex('#7fc8f8'), DARK = hex('#2b2d42'), YEL = hex('#ffd166');
+function plane(propFrame){
+  const w = 18, d = 19, h = 6, cy = 9;
+  return buildModel(w, d, h, (x, y, z) => {
+    const dy = Math.abs(y - cy);
+    // propeller
+    if (x === 17){
+      if (propFrame === 0 && z === 2 && dy <= 3) return DARK;
+      if (propFrame === 1 && dy === 0 && z <= 4) return DARK;
+      return null;
+    }
+    // fuselage
+    if (x >= 2 && x <= 16 && dy <= 1 && z >= 1 && z <= 3){
+      if (x === 16) return (dy === 0 && z === 2) ? YEL : RED;
+      if (z === 3 && x >= 10 && x <= 12 && dy <= 1) return GLASS;
+      if (z === 2 && dy === 1 && x > 3 && x < 15) return RED; // stripe
+      return BODY;
+    }
+    if (x >= 0 && x <= 2 && dy === 0 && z >= 1 && z <= 5) return z >= 4 ? RED : BODY; // fin
+    if (x >= 0 && x <= 2 && dy <= 4 && z === 2) return RED; // tailplane
+    if (x >= 9 && x <= 12 && z === 2) { // main wing
+      if (dy >= 8) return null;
+      return dy > 6 ? YEL : RED;
+    }
+    return null;
+  });
+}
+
+// ---------- build library ----------
+const LIB = {
+  pine: [0,1,2].map(pine), oak: [0,1].map(oak), house: [0,1,2,3].map(house), rock: [0,1].map(rock),
+  cloud: [0,1,2,3].map(cloud), plane: [plane(0), plane(1)]
+};
+
+// ---------- terrain ----------
+const ground = document.createElement('canvas'); ground.width = WORLD; ground.height = WORLD;
+const H = new Float32Array(WORLD * WORLD), F = new Float32Array(WORLD * WORLD), V = new Float32Array(WORLD * WORLD);
+(() => {
+  const g = ground.getContext('2d'), img = g.createImageData(WORLD, WORLD);
+  const water = hex('#3a86c8'), deep = hex('#2a6aa8'), sand = hex('#e9d8a6'), grass = hex('#7cb342'), grass2 = hex('#689f38'), path = hex('#c9b38a');
+  for (let y = 0; y < WORLD; y++) for (let x = 0; x < WORLD; x++){
+    const i = y * WORLD + x;
+    const e = fbm(x, y, 1), f = fbm(x, y, 2), v = fbm(x, y, 3);
+    H[i] = e; F[i] = f; V[i] = v;
+    let col;
+    if (e < 0.36) col = e < 0.30 ? deep : water;
+    else if (e < 0.40) col = sand;
+    else col = (f > 0.55 ? grass2 : grass);
+    if (e >= 0.40 && v > 0.66 && Math.abs(fbm(x * 3, y, 4) - 0.5) < 0.012) col = path; // village lanes
+    const n = 0.93 + hash(x, y, 9) * 0.12;
+    const cc = shade(col, n), j = i * 4;
+    img.data[j] = cc[0]; img.data[j+1] = cc[1]; img.data[j+2] = cc[2]; img.data[j+3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+})();
+
+// ---------- scatter objects ----------
+const objects = [];
+seed = 42;
+for (let gy = 0; gy < WORLD; gy += 6) for (let gx = 0; gx < WORLD; gx += 6){
+  const x = gx + rnd() * 5, y = gy + rnd() * 5;
+  const i = (y | 0) * WORLD + (x | 0), e = H[i], f = F[i], v = V[i];
+  if (e < 0.40) continue;
+  if (v > 0.64 && e > 0.42){
+    if (rnd() < 0.22 && (gx % 12 === 0) && (gy % 12 === 0)) objects.push({ m: LIB.house[(rnd() * 4) | 0], x, y, yaw: ((rnd() * 4) | 0) * Math.PI / 2 + (rnd() - .5) * .15 });
+    else if (rnd() < 0.05) objects.push({ m: LIB.oak[(rnd() * 2) | 0], x, y, yaw: rnd() * 6.28 });
+    continue;
+  }
+  if (e < 0.43 && rnd() < 0.08){ objects.push({ m: LIB.rock[(rnd() * 2) | 0], x, y, yaw: rnd() * 6.28 }); continue; }
+  const dens = f > 0.55 ? 0.75 : f > 0.48 ? 0.25 : 0.04;
+  if (rnd() < dens) objects.push({ m: (f > 0.6 || rnd() < .5) ? LIB.pine[(rnd() * 3) | 0] : LIB.oak[(rnd() * 2) | 0], x, y, yaw: rnd() * 6.28 });
+}
+const clouds = [];
+for (let k = 0; k < 26; k++) clouds.push({ m: LIB.cloud[k % 4], x: rnd() * WORLD, y: rnd() * WORLD, yaw: rnd() * 6.28, alt: 52 + rnd() * 10 });
+
+// ---------- state ----------
+const P = { x: WORLD / 2, y: WORLD / 2, hd: -Math.PI / 2, turn: 0, alt: 30 };
+let camHd = P.hd, keys = {}, touchDir = 0, lastInput = -1e9, autoT = 0;
+const ui = { gap: document.getElementById('gap'), gapv: document.getElementById('gapv'), fill: document.getElementById('fill'), follow: document.getElementById('follow'), auto: document.getElementById('auto'), explode: document.getElementById('explode'), stats: document.getElementById('stats') };
+let gap = 3, gapTarget = 3;
+ui.gap.oninput = () => { gapTarget = +ui.gap.value; ui.gapv.textContent = ui.gap.value; };
+let exploded = false;
+ui.explode.onclick = () => { exploded = !exploded; ui.explode.textContent = exploded ? 'Restack' : 'Explode slices'; gapTarget = exploded ? 8 : 3; ui.gap.value = gapTarget; ui.gapv.textContent = gapTarget; ui.fill.checked = !exploded; };
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+function onTouch(e){
+  if (e.target !== cv) return;
+  const t = e.touches ? e.touches[0] : e;
+  if (!t || (e.type === 'mousemove' && !(e.buttons & 1))) { if (e.type !== 'mousemove') touchDir = 0; return; }
+  touchDir = t.clientX < innerWidth / 2 ? -1 : 1;
+}
+cv.addEventListener('touchstart', onTouch, { passive: true }); cv.addEventListener('touchmove', onTouch, { passive: true });
+cv.addEventListener('touchend', e => { if (!e.touches.length) touchDir = 0; });
+cv.addEventListener('mousedown', onTouch); cv.addEventListener('mousemove', onTouch); addEventListener('mouseup', () => touchDir = 0);
+
+// ---------- drawing ----------
+let drawCalls = 0;
+function wrapD(d){ return ((d + WORLD * 1.5) % WORLD) - WORLD / 2; }
+
+function drawStack(m, sx, sy, rot, lift, step, rep, alpha){
+  const c = Math.cos(rot) * S, s = Math.sin(rot) * S, hw = m.w / 2, hd = m.d / 2;
+  if (alpha !== 1) ctx.globalAlpha = alpha;
+  const sub = step / rep;
+  for (let z = 0; z < m.h; z++){
+    const L = m.layers[z]; if (!L) continue;
+    for (let k = 0; k < rep; k++){
+      ctx.setTransform(c, s, -s, c, sx, sy - lift - (z * rep + k) * sub);
+      ctx.drawImage(L, -hw, -hd); drawCalls++;
+    }
+  }
+  if (alpha !== 1) ctx.globalAlpha = 1;
+}
+function drawShadow(m, sx, sy, rot, alpha){
+  const c = Math.cos(rot) * S, s = Math.sin(rot) * S;
+  ctx.globalAlpha = alpha; ctx.globalCompositeOperation = 'multiply';
+  ctx.setTransform(c, s, -s, c, sx, sy);
+  ctx.drawImage(m.shadowCanvas || (m.shadowCanvas = darken(m.silhouette)), -m.w / 2, -m.d / 2); drawCalls++;
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+}
+function darken(src){
+  const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+  const g = c.getContext('2d'); g.drawImage(src, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#1b263b'; g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+
+let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, time = 0;
+function frame(now){
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; time += dt;
+  fpsAcc += dt; fpsN++; if (fpsAcc > .5){ fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+
+  // input
+  let steer = (keys['arrowleft'] || keys['a'] ? -1 : 0) + (keys['arrowright'] || keys['d'] ? 1 : 0) + touchDir;
+  if (steer) lastInput = time;
+  if (!steer && ui.auto.checked && time - lastInput > 2.5){
+    autoT += dt; steer = Math.sin(autoT * 0.35) * 0.6 + Math.sin(autoT * 0.13 + 1) * 0.5;
+  }
+  steer = Math.max(-1, Math.min(1, steer));
+  P.turn += (steer - P.turn) * Math.min(1, dt * 4);
+  P.hd += P.turn * 1.3 * dt;
+  const speed = 34;
+  P.x = (P.x + Math.cos(P.hd) * speed * dt + WORLD) % WORLD;
+  P.y = (P.y + Math.sin(P.hd) * speed * dt + WORLD) % WORLD;
+  // camera heading lags behind the plane a little, so you see the plane rotate too
+  let dh = P.hd - camHd; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+  if (ui.follow.checked) camHd += dh * Math.min(1, dt * 2.2);
+  gap += (gapTarget - gap) * Math.min(1, dt * 6);
+
+  for (const c of clouds){ c.x = (c.x + 3 * dt) % WORLD; c.y = (c.y + 1.5 * dt) % WORLD; }
+
+  // camera
+  const phi = ui.follow.checked ? (-camHd - Math.PI / 2) : 0; // world->screen rotation
+  const cphi = Math.cos(phi), sphi = Math.sin(phi);
+  const cx = Wpx / 2, cy = Hpx * 0.68;
+  const step = gap * S / 3; // screen px between slices
+  const rep = ui.fill.checked ? Math.max(1, Math.min(4, Math.ceil(step / (1.4 * DPR)))) : 1;
+  drawCalls = 0;
+
+  // ground (draw the tileable map 3x3 so wrap is seamless)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#2a6aa8'; ctx.fillRect(0, 0, Wpx, Hpx);
+  ctx.imageSmoothingEnabled = false;
+  const a = cphi * S, b = sphi * S;
+  const ex = cx - (a * P.x - b * P.y), ey = cy - (b * P.x + a * P.y);
+  ctx.setTransform(a, b, -b, a, ex, ey);
+  for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) { ctx.drawImage(ground, ox * WORLD, oy * WORLD); drawCalls++; }
+
+  // project + cull
+  const margin = 40 * S, vis = [];
+  const proj = o => {
+    const dx = wrapD(o.x - P.x), dy = wrapD(o.y - P.y);
+    return [cx + S * (dx * cphi - dy * sphi), cy + S * (dx * sphi + dy * cphi)];
+  };
+  for (const o of objects){
+    const [sx, sy] = proj(o);
+    if (sx < -margin || sx > Wpx + margin || sy < -margin || sy > Hpx + margin + o.m.h * step) continue;
+    vis.push([sy, sx, o]);
+  }
+  // cloud shadows on the ground
+  for (const c of clouds){ const [sx, sy] = proj(c); if (sx > -margin*2 && sx < Wpx + margin*2 && sy > -margin*2 && sy < Hpx + margin*2) drawShadow(c.m, sx, sy, phi + c.yaw, 0.18); }
+  // plane shadow
+  const planeM = LIB.plane[(time * 30 | 0) % 2];
+  drawShadow(planeM, cx + 6 * DPR, cy + 4 * DPR, phi + P.hd, 0.35);
+
+  // painter's sort by screen-y, then draw stacks
+  vis.sort((p, q) => p[0] - q[0]);
+  for (const [sy, sx, o] of vis) drawStack(o.m, sx, sy, phi + o.yaw, 0, step, rep, 1);
+
+  // plane: same stack, just lifted by its altitude (in slice units) + a little bob
+  const bob = Math.sin(time * 2) * 1.2;
+  drawStack(planeM, cx, cy, phi + P.hd, (P.alt + bob) * S, step, rep, 1);
+
+  // clouds are higher than the plane, so they're drawn last
+  const cl = [];
+  for (const c of clouds){ const [sx, sy] = proj(c); if (sx > -margin*2 && sx < Wpx + margin*2 && sy > -margin*2 && sy < Hpx + margin*2 + c.alt * S) cl.push([sy, sx, c]); }
+  cl.sort((p, q) => p[0] - q[0]);
+  for (const [sy, sx, c] of cl) drawStack(c.m, sx, sy, phi + c.yaw, c.alt * S, step, rep, 0.82);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ui.stats.textContent = `${vis.length} stacks on screen · ${drawCalls} drawImage calls · ${rep}× fill · ${fps} fps`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
