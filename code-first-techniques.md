@@ -472,7 +472,17 @@ Translucent brush strokes inside large shapes give the paint a direction. Each l
 - Music needs a tap (browser audio rules). The first tap on the record player starts it.
 - The bench needs no tap. It times the spin, the notes and the book open and close.
 
-**Numbers.** The headless Chromium bake takes 9–16 ms at pixel ratio 1 for 13 layers. Headless frame timing has no vsync, so its fps are for comparison only. The iPhone bench (`?desk&bench`) has not run yet.
+**Numbers.** The headless Chromium bake takes 9–16 ms at pixel ratio 1 for 13 layers. Headless frame timing has no vsync, so its fps are for comparison only. The iPhone 14 Pro bench (Safari, the live site, 2026-11-16) passes every scenario:
+
+| Scenario | fps | p95 gap | Slow frames |
+|---|---|---|---|
+| Desk idle (steam) | 60 | 17 ms | 1% |
+| Record spinning, notes | 60 | 17 ms | 0% |
+| Book opening | 60 | 17 ms | 0% |
+| Book open | 60 | 17 ms | 0% |
+| Book closing | 60 | 17 ms | 0% |
+
+The bake of 13 layers takes 27 ms on the iPhone at pixel ratio 2. Safari applies the gouache filters in SVG images. The 3D cover turn costs nothing that the bench can see.
 
 ## 8. Decisions so far
 

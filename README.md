@@ -12,5 +12,12 @@ Experiments for a storybook game where every asset (world, characters, light, mu
 | `prototypes/06-baked-svg-puppet.html` | The gouache drawing as an animated puppet: baked SVG parts on a canvas rig, springs, expressions, taps |
 | `prototypes/07-gait-walker.html` | The character in profile with procedural gaits (walk, run, skip, sneak), a Froude-based speed slider, card-flip turns, and Pip's four-legged walk, trot and gallop, with a footfall chart |
 | `prototypes/08-babble-voices.html` | Synthesized dialogue voices: blip, chatter and formant babble per character, with intonation, text synced to the audio clock, and mouth flap |
+| `prototypes/09-style-lab.html` | The house style for the voxel look (outlines, rounded corners), the per-frame budget for cache rebuilds, and the after-drag freeze fix |
 
 Open any file in a browser. The findings are in `code-first-techniques.md`.
+
+The findings record every phone benchmark: what was slow on an iPhone, why, and the fix. Section 7 holds the performance rules. Book one, *The Adventure of Kai the Brave*, is built from this research. Play it at https://storybooks.asfarlab.fun.
+
+## Licence
+
+MIT. See `LICENSE`.
